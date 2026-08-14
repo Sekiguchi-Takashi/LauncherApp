@@ -62,3 +62,14 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 長押しメニュー: ホーム設定を開く / このランチャーを既定にする（RoleManager） / このアイコンを隠す
 - 設定ダイアログにSwitch「ランチャー切替アイコン」を追加（LauncherSettings.switchIcon、既定ON）
 - 注意: 端末がすでに本アプリを既定ホームにしている場合、RoleManagerの要求は何も起きないため、切替にはホーム設定画面を使う設計にしている
+
+## v1.5 実装済み（CI・署名の整理）
+- 署名を1系統に統一: app/build.gradle.kts の debug signingConfig が ci/appathy.keystore（alias appathy、パスワードは環境変数 APPATHY_STORE_PASS）を優先し、無ければ app/debug.keystore にフォールバック
+- release.yml の apksigner 再署名を廃止（Gradleが署名済みのため）。代わりに apksigner verify --print-certs で署名者を確認
+- 鍵とパスワードを GitHub Secrets へ: KEYSTORE_B64（keystoreのbase64）と KEYSTORE_PASSWORD。両ワークフローが実行時に ci/appathy.keystore へ復元し、最後に必ず削除。Secretが未設定ならエラーで停止
+- ci/appathy.keystore を .gitignore に追加、deploy.sh が git rm --cached で追跡解除
+- deploy.sh に push 前の fetch + pull --rebase を追加（リモート先行時の reject 対策）
+- release.sh 追加: versionName から v<version> タグを作成して push（既存タグがあれば中止）。タグ push で release.yml が起動
+- 注意1: 署名鍵が debug.keystore から appathy 鍵に変わるため、v1.4 以前のインストール済みAPKは一度アンインストールが必要
+- 注意2: git履歴には ci/appathy.keystore と旧パスワードが残る。完全に消すには履歴書き換えか鍵のローテーションが必要（未実施）
+- 注意3: appathy 鍵は key password == store password 前提（旧 release.yml が --ks-pass のみで動作していたことから推定）

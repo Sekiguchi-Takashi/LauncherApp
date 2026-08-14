@@ -12,16 +12,25 @@ android {
         applicationId = "com.appathy.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     signingConfigs {
         getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            val appathyKeystore = rootProject.file("ci/appathy.keystore")
+            val appathyPass = System.getenv("APPATHY_STORE_PASS")
+            if (appathyKeystore.exists() && appathyPass != null && appathyPass.isNotBlank()) {
+                storeFile = appathyKeystore
+                storePassword = appathyPass
+                keyAlias = "appathy"
+                keyPassword = appathyPass
+            } else {
+                storeFile = file("debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
