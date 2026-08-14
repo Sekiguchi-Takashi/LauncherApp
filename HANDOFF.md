@@ -73,3 +73,10 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 注意1: 署名鍵が debug.keystore から appathy 鍵に変わるため、v1.4 以前のインストール済みAPKは一度アンインストールが必要
 - 注意2: git履歴には ci/appathy.keystore と旧パスワードが残る。完全に消すには履歴書き換えか鍵のローテーションが必要（未実施）
 - 注意3: appathy 鍵は key password == store password 前提（旧 release.yml が --ks-pass のみで動作していたことから推定）
+
+## v1.5.1
+- ci/set_secrets.py 追加: GitHub Actions の Secrets（KEYSTORE_B64 / KEYSTORE_PASSWORD）を端末から登録するスクリプト
+  - 依存: PyNaCl（pkg install -y python libsodium → SODIUM_INSTALL=system pip install pynacl）
+  - 使い方: python ci/set_secrets.py <keystoreのパスワード>
+  - ci/appathy.keystore をbase64化し、リポジトリの公開鍵でsealed box暗号化してPUT。最後に登録済みSecret名を表示
+  - GitHubのSecrets APIは平文登録を受け付けないため、curlのみでは登録不可
