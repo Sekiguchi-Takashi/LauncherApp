@@ -51,6 +51,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -76,6 +78,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -425,6 +428,23 @@ fun expandNotifications(context: Context) {
     }
 }
 
+fun openClock(context: Context) {
+    val intent = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(intent) }.isFailure) {
+        Toast.makeText(context, "時計アプリを開けませんでした", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun openCalendar(context: Context) {
+    val uri = Uri.parse("content://com.android.calendar/time/" + System.currentTimeMillis())
+    val intent = Intent(Intent.ACTION_VIEW, uri)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(intent) }.isFailure) {
+        Toast.makeText(context, "カレンダーを開けませんでした", Toast.LENGTH_SHORT).show()
+    }
+}
+
 fun openLauncherChooser(context: Context) {
     val candidates = listOf(
         Intent(Settings.ACTION_HOME_SETTINGS),
@@ -516,8 +536,18 @@ fun HomeScreen(
             .padding(top = 40.dp, bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(timeFmt.format(now), fontSize = 40.sp, color = Color.White)
-        Text(dateFmt.format(now), fontSize = 14.sp, color = Color.White)
+        Text(
+            timeFmt.format(now),
+            fontSize = 40.sp,
+            color = Color.White,
+            modifier = Modifier.clickable { openClock(context) }
+        )
+        Text(
+            dateFmt.format(now),
+            fontSize = 14.sp,
+            color = Color.White,
+            modifier = Modifier.clickable { openCalendar(context) }
+        )
         Spacer(Modifier.height(8.dp))
 
         Box(
@@ -1035,6 +1065,13 @@ fun AppDrawer(
             onValueChange = { query = it },
             placeholder = { Text("アプリを検索") },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    val first = filtered.firstOrNull()
+                    if (first != null) onLaunch(first)
+                }
+            ),
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Color.White,
