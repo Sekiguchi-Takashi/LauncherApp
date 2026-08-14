@@ -80,3 +80,8 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 使い方: python ci/set_secrets.py <keystoreのパスワード>
   - ci/appathy.keystore をbase64化し、リポジトリの公開鍵でsealed box暗号化してPUT。最後に登録済みSecret名を表示
   - GitHubのSecrets APIは平文登録を受け付けないため、curlのみでは登録不可
+
+## v1.5.2
+- ci/release.template.yml 追加: rollout.sh が配布すべき Secrets 版 release.yml のテンプレート
+- ci/CATALOGAPP_NOTES.md 追加: CatalogApp 側で必要な修正の申し送り
+- 重要: CatalogApp の rollout.sh が GitHub API 経由で release.yml と ci/appathy.keystore を各リポジトリへ直接コミットしているため、LauncherApp 側の v1.5 対策は rollout.sh を直すまで恒久的ではない（次の配布で平文版に戻る）
