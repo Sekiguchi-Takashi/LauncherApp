@@ -3,4 +3,3 @@ build/
 local.properties
 *.iml
 .idea/
-ci/appathy.keystore

@@ -69,7 +69,6 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 鍵とパスワードを GitHub Secrets へ: KEYSTORE_B64（keystoreのbase64）と KEYSTORE_PASSWORD。両ワークフローが実行時に ci/appathy.keystore へ復元し、最後に必ず削除。Secretが未設定ならエラーで停止
 - ci/appathy.keystore を .gitignore に追加、deploy.sh が git rm --cached で追跡解除
 - deploy.sh に push 前の fetch + pull --rebase を追加（リモート先行時の reject 対策）
-- release.sh 追加: versionName から v<version> タグを作成して push（既存タグがあれば中止）。タグ push で release.yml が起動
 - 注意1: 署名鍵が debug.keystore から appathy 鍵に変わるため、v1.4 以前のインストール済みAPKは一度アンインストールが必要
 - 注意2: git履歴には ci/appathy.keystore と旧パスワードが残る。完全に消すには履歴書き換えか鍵のローテーションが必要（未実施）
 - 注意3: appathy 鍵は key password == store password 前提（旧 release.yml が --ks-pass のみで動作していたことから推定）
@@ -89,3 +88,13 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 ## v1.6 実装済み
 - 時計タップで時計アプリ（AlarmClock.ACTION_SHOW_ALARMS）、日付タップでカレンダー（content://com.android.calendar/time/<millis>）を起動。失敗時はToast
 - ドロワーの検索欄をImeAction.Searchにし、キーボードの検索キーで先頭候補を起動
+
+## v1.6.1（deploy.sh 恒久仕様へ更新）
+- deploy.sh を指定仕様に統一: shebang は Termux の bash 絶対パス、set -e なし
+  - `git add -A` → `git commit` → `git pull --rebase origin main` → `git push -u origin main`
+  - push 後に GitHub API で最新リリースのタグを取得し、末尾を +1 した次タグを算出（取得できなければ v1.0.0）
+  - heads/main の SHA を取得して git/refs にタグを POST → タグ push で release.yml が起動し、Release が自作アプリストアに更新として現れる
+- pull --rebase が必須な理由: CatalogApp が API 経由で release.yml と ci/appathy.keystore を直接コミットするため、無いと push が rejected になる
+- ci/ と .github/workflows/release.yml は配布ビルドに必要なため削除しない。旧 deploy.sh にあった `git rm --cached ci/appathy.keystore` と .gitignore の該当行は撤去済み
+- release.sh は deploy.sh がタグ発行を内包したため廃止
+- 注意: タグは「直近リリースの末尾+1」で決まり、app/build.gradle.kts の versionName とは連動しない。両者がずれるとストア表示とアプリ内バージョンが食い違う
