@@ -21,46 +21,27 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
-      - name: Restore signing keystore
-        env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-        run: |
-          if [ -z "$KEYSTORE_B64" ]; then
-            echo "::error::secret KEYSTORE_B64 is not set"
-            exit 1
-          fi
-          mkdir -p ci
-          printf '%s' "$KEYSTORE_B64" | base64 -d > ci/appathy.keystore
+          gradle-version: '8.9'
       - name: Build all modules
-        env:
-          APPATHY_STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -z "$APPATHY_STORE_PASS" ]; then
-            echo "::error::secret KEYSTORE_PASSWORD is not set"
-            exit 1
-          fi
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug
-          else
-            gradle assembleDebug
-          fi
-      - name: Collect APKs
+          if [ -f gradlew ]; then chmod +x gradlew; GR="./gradlew"; else GR="gradle"; fi
+          $GR assembleRelease || $GR assembleDebug
+      - name: Collect, align and sign APKs
         run: |
           mkdir -p out
           TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           for f in $(find . -path ./out -prune -o -name '*.apk' -path '*/outputs/apk/*' -print); do
+            case "$f" in
+              */apk/debug/*) if find . -path '*/outputs/apk/release/*.apk' | grep -q .; then continue; fi ;;
+            esac
             d=${f%%/build/outputs/*}
             m=$(basename "$d")
             o="out/${m}-${GITHUB_REF_NAME:-manual}.apk"
-            cp "$f" "$o"
-            "$TOOLS/apksigner" verify --print-certs "$o"
+            "$TOOLS/zipalign" -f 4 "$f" "$o"
+            "$TOOLS/apksigner" sign --ks ci/appathy.keystore --ks-pass pass:appathy-store --ks-key-alias appathy "$o"
+            "$TOOLS/apksigner" verify --print-certs "$o" | head -2
           done
           ls -la out/
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*.apk
-      - name: Remove keystore
-        if: always()
-        run: rm -f ci/appathy.keystore
