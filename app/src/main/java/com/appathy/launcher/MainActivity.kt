@@ -51,6 +51,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -159,6 +160,8 @@ fun LauncherRoot(
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
     var widgets by remember { mutableStateOf(WidgetData.load(context)) }
+    var folders by remember { mutableStateOf(Folders.load(context)) }
+    var openFolderId by remember { mutableStateOf<String?>(null) }
     var pages by remember { mutableStateOf(LauncherSettings.pages(context)) }
     var rows by remember { mutableStateOf(LauncherSettings.rows(context)) }
     var cols by remember { mutableStateOf(LauncherSettings.cols(context)) }
@@ -177,6 +180,16 @@ fun LauncherRoot(
     fun saveWidgets(list: List<WidgetItem>) {
         widgets = list
         WidgetData.save(context, list)
+    }
+
+    fun saveFolders(list: List<FolderEntry>) {
+        folders = list
+        Folders.save(context, list)
+    }
+
+    fun applyDrop(result: DropResult) {
+        saveHome(result.items)
+        saveFolders(result.folders)
     }
 
     fun toggleFavorite(pkg: String) {
@@ -285,12 +298,19 @@ fun LauncherRoot(
             awm = awm,
             onOpenDrawer = { drawerOpen = true },
             onLaunch = { launchApp(context, it) },
-            onRemoveItem = { item -> saveHome(homeItems - item) },
-            onMoveItem = { item, r, c ->
-                if (!cellCoveredByWidget(widgets, item.page, r, c)) {
-                    saveHome(placeItem(homeItems, item, item.page, r, c))
+            onRemoveItem = { item ->
+                saveHome(homeItems - item)
+                if (item.packageName == FOLDER_PKG) {
+                    saveFolders(folders.filter { it.id != item.activityName })
                 }
             },
+            onMoveItem = { item, r, c ->
+                if (!cellCoveredByWidget(widgets, item.page, r, c)) {
+                    applyDrop(dropOnto(homeItems, folders, item, r, c))
+                }
+            },
+            folders = folders,
+            onOpenFolder = { openFolderId = it },
             onMoveToPage = { item, delta ->
                 val target = item.page + delta
                 if (target in 0 until pages) {
@@ -350,6 +370,40 @@ fun LauncherRoot(
         }
     }
     BackHandler(enabled = drawerOpen) { drawerOpen = false }
+
+    val openFolder = folders.find { it.id == openFolderId }
+    if (openFolder != null) {
+        FolderDialog(
+            folder = openFolder,
+            apps = apps,
+            onLaunch = {
+                launchApp(context, it)
+                openFolderId = null
+            },
+            onRename = { name ->
+                saveFolders(
+                    folders.map {
+                        if (it.id == openFolder.id) it.copy(name = Folders.sanitize(name)) else it
+                    }
+                )
+            },
+            onTakeOut = { key ->
+                val result = removeFromFolder(
+                    homeItems, folders, openFolder.id, key, pages, rows, cols, true
+                )
+                applyDrop(result)
+                if (result.folders.none { it.id == openFolder.id }) openFolderId = null
+            },
+            onRemove = { key ->
+                val result = removeFromFolder(
+                    homeItems, folders, openFolder.id, key, pages, rows, cols, false
+                )
+                applyDrop(result)
+                if (result.folders.none { it.id == openFolder.id }) openFolderId = null
+            },
+            onDismiss = { openFolderId = null }
+        )
+    }
 
     if (showSettings) {
         SettingsDialog(
@@ -503,7 +557,9 @@ fun HomeScreen(
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
-    onHideSwitchIcon: () -> Unit
+    onHideSwitchIcon: () -> Unit,
+    folders: List<FolderEntry>,
+    onOpenFolder: (String) -> Unit
 ) {
     val context = LocalContext.current
     var now by remember { mutableStateOf(Date()) }
@@ -580,7 +636,16 @@ fun HomeScreen(
                     onAppInfo = onAppInfo,
                     onEditWidget = onEditWidget,
                     onDeleteWidget = onDeleteWidget,
-                    onWidgetToPage = onWidgetToPage
+                    onWidgetToPage = onWidgetToPage,
+                    folders = folders,
+                    onOpenFolder = onOpenFolder,
+                    resolveKey = { key ->
+                        val i = key.lastIndexOf('/')
+                        if (i <= 0) null else apps.find {
+                            it.packageName == key.substring(0, i) &&
+                                it.activityName == key.substring(i + 1)
+                        }
+                    }
                 )
             }
             DropdownMenu(expanded = homeMenu, onDismissRequest = { homeMenu = false }) {
@@ -746,7 +811,10 @@ fun WorkspacePage(
     onAppInfo: (String) -> Unit,
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
-    onWidgetToPage: (WidgetItem, Int) -> Unit
+    onWidgetToPage: (WidgetItem, Int) -> Unit,
+    folders: List<FolderEntry>,
+    onOpenFolder: (String) -> Unit,
+    resolveKey: (String) -> AppEntry?
 ) {
     BoxWithConstraints(
         Modifier
@@ -776,12 +844,24 @@ fun WorkspacePage(
                             contentAlignment = Alignment.Center
                         ) {
                             val item = items.find { it.row == r && it.col == c }
-                            val app = item?.let { resolve(it) }
-                            if (item != null && app != null && item != dragItem) {
+                            val isFolder = item != null && item.packageName == FOLDER_PKG
+                            val folder = if (isFolder) {
+                                folders.find { it.id == item!!.activityName }
+                            } else null
+                            val app = if (isFolder) null else item?.let { resolve(it) }
+                            val visible = item != null && item != dragItem &&
+                                (app != null || folder != null)
+                            if (item != null && visible) {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
-                                        .clickable { onLaunch(app) }
+                                        .clickable {
+                                            if (folder != null) {
+                                                onOpenFolder(folder.id)
+                                            } else if (app != null) {
+                                                onLaunch(app)
+                                            }
+                                        }
                                         .pointerInput(item) {
                                             detectDragGesturesAfterLongPress(
                                                 onDragStart = { offset ->
@@ -817,21 +897,32 @@ fun WorkspacePage(
                                             )
                                         }
                                 ) {
-                                    Image(
-                                        bitmap = app.icon,
-                                        contentDescription = app.label,
-                                        modifier = Modifier.size(48.dp)
-                                    )
-                                    Text(
-                                        app.label,
-                                        fontSize = 10.sp,
-                                        color = Color.White,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    if (folder != null) {
+                                        FolderIcon(folder = folder, resolve = resolveKey)
+                                        Text(
+                                            folder.name,
+                                            fontSize = 10.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    } else if (app != null) {
+                                        Image(
+                                            bitmap = app.icon,
+                                            contentDescription = app.label,
+                                            modifier = Modifier.size(48.dp)
+                                        )
+                                        Text(
+                                            app.label,
+                                            fontSize = 10.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
-                            if (item != null && app != null) {
+                            if (item != null && (app != null || folder != null)) {
                                 DropdownMenu(
                                     expanded = menuFor == item,
                                     onDismissRequest = { menuFor = null }
@@ -855,19 +946,34 @@ fun WorkspacePage(
                                         )
                                     }
                                     DropdownMenuItem(
-                                        text = { Text("ホームから削除") },
+                                        text = {
+                                            Text(
+                                                if (folder != null) "フォルダを削除"
+                                                else "ホームから削除"
+                                            )
+                                        },
                                         onClick = {
                                             menuFor = null
                                             onRemoveItem(item)
                                         }
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text("アプリ情報") },
-                                        onClick = {
-                                            menuFor = null
-                                            onAppInfo(app.packageName)
-                                        }
-                                    )
+                                    if (folder != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("フォルダを開く") },
+                                            onClick = {
+                                                menuFor = null
+                                                onOpenFolder(folder.id)
+                                            }
+                                        )
+                                    } else if (app != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("アプリ情報") },
+                                            onClick = {
+                                                menuFor = null
+                                                onAppInfo(app.packageName)
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -951,19 +1057,28 @@ fun WorkspacePage(
         val dragging = dragItem
         if (dragging != null) {
             val dragApp = resolve(dragging)
-            if (dragApp != null) {
-                Image(
-                    bitmap = dragApp.icon,
-                    contentDescription = dragApp.label,
-                    modifier = Modifier
-                        .offset {
-                            IntOffset(
-                                (dragPos.x - 28.dp.toPx()).roundToInt(),
-                                (dragPos.y - 28.dp.toPx()).roundToInt()
-                            )
-                        }
-                        .size(56.dp)
-                )
+            val dragFolder = if (dragging.packageName == FOLDER_PKG) {
+                folders.find { it.id == dragging.activityName }
+            } else null
+            Box(
+                Modifier
+                    .offset {
+                        IntOffset(
+                            (dragPos.x - 28.dp.toPx()).roundToInt(),
+                            (dragPos.y - 28.dp.toPx()).roundToInt()
+                        )
+                    }
+                    .size(56.dp)
+            ) {
+                if (dragFolder != null) {
+                    FolderIcon(folder = dragFolder, resolve = resolveKey)
+                } else if (dragApp != null) {
+                    Image(
+                        bitmap = dragApp.icon,
+                        contentDescription = dragApp.label,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
@@ -1197,4 +1312,135 @@ fun SettingRow(
         Text(value.toString(), modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
         TextButton(onClick = { if (value < max) onChange(value + 1) }) { Text("＋") }
     }
+}
+
+@Composable
+fun FolderIcon(
+    folder: FolderEntry,
+    resolve: (String) -> AppEntry?
+) {
+    val shown = folder.apps.mapNotNull { resolve(it) }.take(4)
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.2f))
+            .padding(4.dp)
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            repeat(2) { r ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    repeat(2) { c ->
+                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                            val entry = shown.getOrNull(r * 2 + c)
+                            if (entry != null) {
+                                Image(
+                                    bitmap = entry.icon,
+                                    contentDescription = entry.label,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FolderDialog(
+    folder: FolderEntry,
+    apps: List<AppEntry>,
+    onLaunch: (AppEntry) -> Unit,
+    onRename: (String) -> Unit,
+    onTakeOut: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember(folder.id) { mutableStateOf(folder.name) }
+    val entries = folder.apps.mapNotNull { key ->
+        val i = key.lastIndexOf('/')
+        if (i <= 0) null else {
+            val found = apps.find {
+                it.packageName == key.substring(0, i) && it.activityName == key.substring(i + 1)
+            }
+            if (found == null) null else Pair(key, found)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("閉じる") }
+        },
+        title = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = {
+                    name = it
+                    onRename(it)
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        text = {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(entries.size) { i ->
+                    val key = entries[i].first
+                    val app = entries[i].second
+                    var menu by remember(key) { mutableStateOf(false) }
+                    Box {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.combinedClickable(
+                                onClick = { onLaunch(app) },
+                                onLongClick = { menu = true }
+                            )
+                        ) {
+                            Image(
+                                bitmap = app.icon,
+                                contentDescription = app.label,
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Text(
+                                app.label,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("ホームに出す") },
+                                onClick = {
+                                    menu = false
+                                    onTakeOut(key)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("フォルダから削除") },
+                                onClick = {
+                                    menu = false
+                                    onRemove(key)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    )
 }

@@ -171,6 +171,152 @@ fun freeRegion(
     return null
 }
 
+const val FOLDER_PKG = "__folder__"
+
+data class FolderEntry(
+    val id: String,
+    val name: String,
+    val apps: List<String>
+)
+
+object Folders {
+    private const val PREF = "launcher_prefs"
+    private const val KEY = "folders"
+
+    fun load(context: Context): List<FolderEntry> =
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString(KEY, "")!!.split(";").filter { it.isNotBlank() }.mapNotNull {
+                val f = it.split("|")
+                if (f.size == 3) {
+                    FolderEntry(f[0], f[1], f[2].split(",").filter { s -> s.isNotBlank() })
+                } else null
+            }
+
+    fun save(context: Context, list: List<FolderEntry>) {
+        val encoded = list.joinToString(";") {
+            it.id + "|" + sanitize(it.name) + "|" + it.apps.joinToString(",")
+        }
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putString(KEY, encoded).apply()
+    }
+
+    fun sanitize(name: String): String {
+        val cleaned = name.replace("|", "-").replace(";", "-").replace(",", "-").trim()
+        return if (cleaned.isBlank()) "フォルダ" else cleaned
+    }
+
+    fun newId(): String = "f" + System.currentTimeMillis()
+}
+
+fun appKey(app: AppEntry): String = app.packageName + "/" + app.activityName
+
+fun appKey(item: HomeItem): String = item.packageName + "/" + item.activityName
+
+fun keyToItem(key: String, page: Int, row: Int, col: Int): HomeItem? {
+    val i = key.lastIndexOf('/')
+    if (i <= 0) return null
+    return HomeItem(page, row, col, key.substring(0, i), key.substring(i + 1))
+}
+
+data class DropResult(
+    val items: List<HomeItem>,
+    val folders: List<FolderEntry>
+)
+
+fun dropOnto(
+    items: List<HomeItem>,
+    folders: List<FolderEntry>,
+    source: HomeItem,
+    row: Int,
+    col: Int
+): DropResult {
+    if (source.row == row && source.col == col) return DropResult(items, folders)
+    val target = items.find { it.page == source.page && it.row == row && it.col == col }
+
+    if (target == null) {
+        return DropResult(placeItem(items, source, source.page, row, col), folders)
+    }
+
+    val sourceIsFolder = source.packageName == FOLDER_PKG
+    val targetIsFolder = target.packageName == FOLDER_PKG
+
+    if (sourceIsFolder && targetIsFolder) {
+        val sf = folders.find { it.id == source.activityName }
+        val tf = folders.find { it.id == target.activityName }
+        if (sf == null || tf == null) return DropResult(items, folders)
+        val merged = tf.copy(apps = (tf.apps + sf.apps).distinct())
+        return DropResult(
+            items - source,
+            folders.filter { it.id != sf.id }.map { if (it.id == tf.id) merged else it }
+        )
+    }
+
+    if (targetIsFolder) {
+        val tf = folders.find { it.id == target.activityName } ?: return DropResult(items, folders)
+        val updated = tf.copy(apps = (tf.apps + appKey(source)).distinct())
+        return DropResult(
+            items - source,
+            folders.map { if (it.id == tf.id) updated else it }
+        )
+    }
+
+    if (sourceIsFolder) {
+        val sf = folders.find { it.id == source.activityName } ?: return DropResult(items, folders)
+        val updated = sf.copy(apps = (sf.apps + appKey(target)).distinct())
+        return DropResult(
+            (items - target - source) + source.copy(row = row, col = col),
+            folders.map { if (it.id == sf.id) updated else it }
+        )
+    }
+
+    val folder = FolderEntry(
+        id = Folders.newId(),
+        name = "フォルダ",
+        apps = listOf(appKey(target), appKey(source))
+    )
+    return DropResult(
+        (items - target - source) + HomeItem(source.page, row, col, FOLDER_PKG, folder.id),
+        folders + folder
+    )
+}
+
+fun removeFromFolder(
+    items: List<HomeItem>,
+    folders: List<FolderEntry>,
+    folderId: String,
+    key: String,
+    pages: Int,
+    rows: Int,
+    cols: Int,
+    toHome: Boolean
+): DropResult {
+    val folder = folders.find { it.id == folderId } ?: return DropResult(items, folders)
+    val remaining = folder.apps.filter { it != key }
+    val holder = items.find { it.packageName == FOLDER_PKG && it.activityName == folderId }
+
+    var newItems = items
+    if (toHome) {
+        val cell = firstFreeCell(newItems, pages, rows, cols, holder?.page ?: 0)
+        val placed = cell?.let { keyToItem(key, it.first, it.second, it.third) }
+        if (placed != null) newItems = newItems + placed
+    }
+
+    if (remaining.size <= 1 && holder != null) {
+        newItems = newItems - holder
+        val last = remaining.firstOrNull()
+        if (last != null) {
+            val restored = keyToItem(last, holder.page, holder.row, holder.col)
+            if (restored != null) newItems = newItems + restored
+        }
+        return DropResult(newItems, folders.filter { it.id != folderId })
+    }
+
+    return DropResult(
+        newItems,
+        folders.map { if (it.id == folderId) it.copy(apps = remaining) else it }
+    )
+}
+
 fun placeItem(
     items: List<HomeItem>,
     item: HomeItem,

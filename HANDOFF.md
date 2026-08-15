@@ -98,3 +98,15 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - ci/ と .github/workflows/release.yml は配布ビルドに必要なため削除しない。旧 deploy.sh にあった `git rm --cached ci/appathy.keystore` と .gitignore の該当行は撤去済み
 - release.sh は deploy.sh がタグ発行を内包したため廃止
 - 注意: タグは「直近リリースの末尾+1」で決まり、app/build.gradle.kts の versionName とは連動しない。両者がずれるとストア表示とアプリ内バージョンが食い違う
+
+## v1.7 実装済み（フォルダ）
+- データ構造: FolderEntry(id, name, apps) を "id|name|pkg/act,pkg/act" 形式で "folders" キーに永続化（Folders）
+  - ホーム上のフォルダは HomeItem の packageName = FOLDER_PKG（"__folder__"）、activityName = フォルダID で表現。既存の配置データとは互換
+  - 名前に | ; , が入ると壊れるため Folders.sanitize() で置換。空名は「フォルダ」
+- 作成: アイコンを別のアイコンへドロップするとフォルダ化（Nova と同じ挙動）。従来の「位置の入れ替え」は廃止し、空きセルへのドロップのみ移動
+  - フォルダへドロップ = フォルダに追加、フォルダ同士のドロップ = 統合（dropOnto がすべて処理）
+- 表示: FolderIcon が中身の先頭4件を2×2で描画。タップで FolderDialog を開く
+- FolderDialog: 上部のテキスト欄で名前変更（入力即保存）、アプリをタップで起動、長押しで「ホームに出す」/「フォルダから削除」
+- 自動解散: 中身が1件以下になったらフォルダを削除し、残った1件を元のセルへ戻す（removeFromFolder）
+- セル長押しメニュー: フォルダの場合は「フォルダを削除」「フォルダを開く」に切り替わる
+- ドラッグ中の浮遊表示もフォルダに対応
