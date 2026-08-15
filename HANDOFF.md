@@ -9,7 +9,7 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - パッケージ: com.appathy.launcher
 - Kotlin 2.0.20 / AGP 8.5.2 / compileSdk 34 / minSdk 26 / Compose (BOM 2024.09.00)
 - app/debug.keystore 固定（上書きインストール可）
-- ビルド: GitHub Actions (build.yml, gradle 8.7, assembleDebug → artifact "app-debug")
+- ビルド: GitHub Actions。build.yml はコンパイル確認のみ（Artifacts は出さない）、配布APKは release.yml がタグ push で作る Release から取得
 - リポジトリ: Sekiguchi-Takashi/LauncherApp (private)
 
 ## ファイル
@@ -110,3 +110,9 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 自動解散: 中身が1件以下になったらフォルダを削除し、残った1件を元のセルへ戻す（removeFromFolder）
 - セル長押しメニュー: フォルダの場合は「フォルダを削除」「フォルダを開く」に切り替わる
 - ドラッグ中の浮遊表示もフォルダに対応
+
+## v1.7.1
+- build.yml から actions/upload-artifact ステップを削除
+  - 理由: Actions の Artifacts ストレージ無料枠（0.5GB）が枯渇し "Artifact storage quota has been hit" でビルドが失敗するため
+  - APK は Release から配布するので Artifacts は不要。build.yml はコンパイル確認と署名検証のみを担う
+  - 恒久ルール: 今後 build.yml に upload-artifact を入れない
