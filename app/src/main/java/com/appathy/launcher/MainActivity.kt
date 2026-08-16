@@ -25,6 +25,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -78,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -308,7 +310,14 @@ fun LauncherRoot(
     val contentPages = pagesNeeded(homeItems, pages)
     val totalPages = contentPages + 1
 
+    val folderOpen = openFolderId != null
+
     Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (folderOpen) Modifier.blur(20.dp) else Modifier)
+        ) {
         HomeScreen(
             apps = apps,
             homeItems = homeItems,
@@ -371,6 +380,7 @@ fun LauncherRoot(
                 LauncherSettings.setSwitchIcon(context, false)
             }
         )
+        }
         AnimatedVisibility(
             visible = searchOpen,
             enter = slideInVertically { -it },
@@ -386,43 +396,44 @@ fun LauncherRoot(
                 onDismiss = { searchOpen = false }
             )
         }
+
+        val openFolder = folders.find { it.id == openFolderId }
+        if (openFolder != null) {
+            FolderOverlay(
+                folder = openFolder,
+                apps = apps,
+                onLaunch = {
+                    launchApp(context, it)
+                    openFolderId = null
+                },
+                onRename = { name ->
+                    saveFolders(
+                        folders.map {
+                            if (it.id == openFolder.id) it.copy(name = Folders.sanitize(name)) else it
+                        }
+                    )
+                },
+                onTakeOut = { key ->
+                    val result = removeFromFolder(
+                        homeItems, folders, openFolder.id, key, pages, rows, cols, true
+                    )
+                    applyDrop(result)
+                    if (result.folders.none { it.id == openFolder.id }) openFolderId = null
+                },
+                onRemove = { key ->
+                    val result = removeFromFolder(
+                        homeItems, folders, openFolder.id, key, pages, rows, cols, false
+                    )
+                    applyDrop(result)
+                    if (result.folders.none { it.id == openFolder.id }) openFolderId = null
+                },
+                onDismiss = { openFolderId = null }
+            )
+        }
     }
     BackHandler(enabled = searchOpen) { searchOpen = false }
     BackHandler(enabled = editMode && !searchOpen) { editMode = false }
-
-    val openFolder = folders.find { it.id == openFolderId }
-    if (openFolder != null) {
-        FolderDialog(
-            folder = openFolder,
-            apps = apps,
-            onLaunch = {
-                launchApp(context, it)
-                openFolderId = null
-            },
-            onRename = { name ->
-                saveFolders(
-                    folders.map {
-                        if (it.id == openFolder.id) it.copy(name = Folders.sanitize(name)) else it
-                    }
-                )
-            },
-            onTakeOut = { key ->
-                val result = removeFromFolder(
-                    homeItems, folders, openFolder.id, key, pages, rows, cols, true
-                )
-                applyDrop(result)
-                if (result.folders.none { it.id == openFolder.id }) openFolderId = null
-            },
-            onRemove = { key ->
-                val result = removeFromFolder(
-                    homeItems, folders, openFolder.id, key, pages, rows, cols, false
-                )
-                applyDrop(result)
-                if (result.folders.none { it.id == openFolder.id }) openFolderId = null
-            },
-            onDismiss = { openFolderId = null }
-        )
-    }
+    BackHandler(enabled = folderOpen) { openFolderId = null }
 
     if (showSettings) {
         SettingsDialog(
@@ -698,6 +709,18 @@ fun HomeScreen(
                 Text("デフォルトのホームに設定", color = Color.White)
             }
         }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.Black.copy(alpha = 0.28f))
+                .clickable { onOpenSearch() }
+                .padding(horizontal = 14.dp, vertical = 5.dp)
+        ) {
+            Text("検索", fontSize = 12.sp, color = Color.White)
+        }
+        Spacer(Modifier.height(10.dp))
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(18.dp),
@@ -1333,7 +1356,7 @@ fun FolderIcon(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FolderDialog(
+fun FolderOverlay(
     folder: FolderEntry,
     apps: List<AppEntry>,
     onLaunch: (AppEntry) -> Unit,
@@ -1353,12 +1376,35 @@ fun FolderDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("閉じる") }
-        },
-        title = {
+    val scale = remember { Animatable(0.85f) }
+    LaunchedEffect(folder.id) {
+        scale.animateTo(1f, animationSpec = tween(durationMillis = 180))
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xB3000000))
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { onDismiss() })
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                }
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.White.copy(alpha = 0.14f))
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { })
+                }
+                .padding(16.dp)
+        ) {
             OutlinedTextField(
                 value = name,
                 onValueChange = {
@@ -1366,13 +1412,21 @@ fun FolderDialog(
                     onRename(it)
                 },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth(0.7f),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Color.White.copy(alpha = 0.4f),
+                    unfocusedBorderColor = Color.Transparent,
+                    cursorColor = Color.White
+                )
             )
-        },
-        text = {
+            Spacer(Modifier.height(16.dp))
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 items(entries.size) { i ->
                     val key = entries[i].first
@@ -1389,11 +1443,13 @@ fun FolderDialog(
                             Image(
                                 bitmap = app.icon,
                                 contentDescription = app.label,
-                                modifier = Modifier.size(44.dp)
+                                modifier = Modifier.size(52.dp)
                             )
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 app.label,
                                 fontSize = 10.sp,
+                                color = Color.White,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center
@@ -1419,10 +1475,9 @@ fun FolderDialog(
                 }
             }
         }
-    )
+    }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppLibraryPage(
     apps: List<AppEntry>,
