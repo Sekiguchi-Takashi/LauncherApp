@@ -20,6 +20,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -28,6 +34,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +81,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -153,6 +161,7 @@ fun LauncherRoot(
     val context = LocalContext.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     var searchOpen by remember { mutableStateOf(false) }
+    var editMode by remember { mutableStateOf(false) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -311,6 +320,9 @@ fun LauncherRoot(
             cols = cols,
             switchIcon = switchIcon,
             libraryOnly = libraryOnly,
+            editMode = editMode,
+            onEnterEdit = { editMode = true },
+            onExitEdit = { editMode = false },
             onMoveToLibrary = { key -> saveLibrary(libraryOnly + key) },
             onRestoreFromLibrary = { key -> saveLibrary(libraryOnly - key) },
             host = host,
@@ -376,6 +388,7 @@ fun LauncherRoot(
         }
     }
     BackHandler(enabled = searchOpen) { searchOpen = false }
+    BackHandler(enabled = editMode && !searchOpen) { editMode = false }
 
     val openFolder = folders.find { it.id == openFolderId }
     if (openFolder != null) {
@@ -525,6 +538,9 @@ fun HomeScreen(
     cols: Int,
     switchIcon: Boolean,
     libraryOnly: Set<String>,
+    editMode: Boolean,
+    onEnterEdit: () -> Unit,
+    onExitEdit: () -> Unit,
     onMoveToLibrary: (String) -> Unit,
     onRestoreFromLibrary: (String) -> Unit,
     host: AppWidgetHost,
@@ -571,8 +587,11 @@ fun HomeScreen(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .pointerInput(Unit) {
-                    detectTapGestures(onLongPress = { homeMenu = true })
+                .pointerInput(editMode) {
+                    detectTapGestures(
+                        onTap = { if (editMode) onExitEdit() },
+                        onLongPress = { if (!editMode) homeMenu = true }
+                    )
                 }
         ) {
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
@@ -611,6 +630,8 @@ fun HomeScreen(
                     folders = folders,
                     onOpenFolder = onOpenFolder,
                     onMoveToLibrary = onMoveToLibrary,
+                    editMode = editMode,
+                    onEnterEdit = onEnterEdit,
                     resolveKey = { key ->
                         val i = key.lastIndexOf('/')
                         if (i <= 0) null else apps.find {
@@ -621,6 +642,13 @@ fun HomeScreen(
                 )
             }
             DropdownMenu(expanded = homeMenu, onDismissRequest = { homeMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text("ホーム画面を編集") },
+                    onClick = {
+                        homeMenu = false
+                        onEnterEdit()
+                    }
+                )
                 DropdownMenuItem(
                     text = { Text("ウィジェットを追加") },
                     onClick = {
@@ -785,6 +813,8 @@ fun WorkspacePage(
     folders: List<FolderEntry>,
     onOpenFolder: (String) -> Unit,
     onMoveToLibrary: (String) -> Unit,
+    editMode: Boolean,
+    onEnterEdit: () -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
     BoxWithConstraints(
@@ -799,6 +829,16 @@ fun WorkspacePage(
         var dragPos by remember { mutableStateOf(Offset.Zero) }
         var dragStart by remember { mutableStateOf(Offset.Zero) }
         var menuFor by remember { mutableStateOf<HomeItem?>(null) }
+        val wiggle = rememberInfiniteTransition(label = "wiggle")
+        val wiggleAngle by wiggle.animateFloat(
+            initialValue = -2.5f,
+            targetValue = 2.5f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 160, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "wiggleAngle"
+        )
 
         Column(Modifier.fillMaxSize()) {
             repeat(rows) { r ->
@@ -823,17 +863,52 @@ fun WorkspacePage(
                             val visible = item != null && item != dragItem &&
                                 (app != null || folder != null)
                             if (item != null && visible) {
+                                val phase = if ((r + c) % 2 == 0) 1f else -1f
+                                Box {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
-                                        .clickable {
+                                        .graphicsLayer {
+                                            rotationZ = if (editMode) wiggleAngle * phase else 0f
+                                        }
+                                        .clickable(enabled = !editMode) {
                                             if (folder != null) {
                                                 onOpenFolder(folder.id)
                                             } else if (app != null) {
                                                 onLaunch(app)
                                             }
                                         }
-                                        .pointerInput(item) {
+                                        .pointerInput(item, editMode) {
+                                            if (editMode) {
+                                                detectDragGestures(
+                                                    onDragStart = { offset ->
+                                                        val start = Offset(
+                                                            c * cellW + offset.x,
+                                                            r * cellH + offset.y
+                                                        )
+                                                        dragItem = item
+                                                        dragStart = start
+                                                        dragPos = start
+                                                    },
+                                                    onDrag = { change, amount ->
+                                                        change.consume()
+                                                        dragPos += amount
+                                                    },
+                                                    onDragEnd = {
+                                                        val moving = dragItem
+                                                        if (moving != null) {
+                                                            val tc = (dragPos.x / cellW).toInt()
+                                                                .coerceIn(0, cols - 1)
+                                                            val tr = (dragPos.y / cellH).toInt()
+                                                                .coerceIn(0, rows - 1)
+                                                            onMoveItem(moving, tr, tc)
+                                                        }
+                                                        dragItem = null
+                                                    },
+                                                    onDragCancel = { dragItem = null }
+                                                )
+                                                return@pointerInput
+                                            }
                                             detectDragGesturesAfterLongPress(
                                                 onDragStart = { offset ->
                                                     val start = Offset(
@@ -892,6 +967,28 @@ fun WorkspacePage(
                                         )
                                     }
                                 }
+                                if (editMode) {
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.TopStart)
+                                            .offset(x = (-4).dp, y = (-4).dp)
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFE8E8E8))
+                                            .clickable {
+                                                if (app != null) onMoveToLibrary(appKey(app))
+                                                onRemoveItem(item)
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "−",
+                                            fontSize = 14.sp,
+                                            color = Color(0xFF333333)
+                                        )
+                                    }
+                                }
+                                }
                             }
                             if (item != null && (app != null || folder != null)) {
                                 DropdownMenu(
@@ -926,6 +1023,13 @@ fun WorkspacePage(
                                         onClick = {
                                             menuFor = null
                                             onRemoveItem(item)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("ホーム画面を編集") },
+                                        onClick = {
+                                            menuFor = null
+                                            onEnterEdit()
                                         }
                                     )
                                     if (folder != null) {
