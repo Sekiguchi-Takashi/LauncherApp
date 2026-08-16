@@ -116,3 +116,16 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 理由: Actions の Artifacts ストレージ無料枠（0.5GB）が枯渇し "Artifact storage quota has been hit" でビルドが失敗するため
   - APK は Release から配布するので Artifacts は不要。build.yml はコンパイル確認と署名検証のみを担う
   - 恒久ルール: 今後 build.yml に upload-artifact を入れない
+
+## v1.8 実装済み（iOS風 A案：ドロワー廃止）
+- 構造転換: アプリドロワーを廃止。インストール済み全アプリをホームのページへ自動配置（autoPlace）。新規インストールは末尾の空きセルへ自動追加
+  - ページ数は固定ではなく contentPages = max(設定ページ数, 実配置の最大ページ+1)。その右に App Library ページを1枚足した totalPages で Pager を構成
+  - Dock（お気に入り）に入れたアプリとフォルダ内のアプリは自動配置の対象外
+- App Library（最終ページ）: ApplicationInfo.category で自動分類（ゲーム/ミュージック/ビデオ/写真/ソーシャル/ニュース/マップ/仕事効率化/ユーティリティ/その他）。カテゴリごとに角丸カードで最大8件表示、超過分は件数のみ表示。長押しで「ホーム画面に追加」「アプリ情報」
+  - ホームから外したアプリは LibraryApps（"library_only" キー）に記録され、App Library にのみ残る
+- アイコンを squircle に統一（IconUtil.kt）。AdaptiveIconDrawable は前景・背景を合成、非対応アイコンは白地に縮小配置してから角丸マスク
+- Dock: 半透明の角丸パネルに変更、4枠（iOS準拠）
+- 時計・日付の大表示を廃止（iOS のホームには無いため）。openClock/openCalendar も削除
+- ジェスチャー変更: 下スワイプ = Spotlight風検索（全画面）。通知シェードは画面最上端からのシステムジェスチャーに任せる。上スワイプのドロワー起動は廃止
+- セル長押しメニューに「App Libraryへ移動」を追加
+- 注意: 旧 AppDrawer と expandNotifications 経路は削除済み。設定の「ページ数」は最小ページ数として機能する

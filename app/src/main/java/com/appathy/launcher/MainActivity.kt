@@ -87,13 +87,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.concurrent.thread
 import kotlin.math.ceil
 import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -156,7 +152,8 @@ fun LauncherRoot(
 ) {
     val context = LocalContext.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    var drawerOpen by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
     var widgets by remember { mutableStateOf(WidgetData.load(context)) }
@@ -180,6 +177,11 @@ fun LauncherRoot(
     fun saveWidgets(list: List<WidgetItem>) {
         widgets = list
         WidgetData.save(context, list)
+    }
+
+    fun saveLibrary(keys: Set<String>) {
+        libraryOnly = keys
+        LibraryApps.save(context, keys)
     }
 
     fun saveFolders(list: List<FolderEntry>) {
@@ -283,6 +285,19 @@ fun LauncherRoot(
     }
 
     val favApps = favorites.mapNotNull { pkg -> apps.find { it.packageName == pkg } }
+    val dockKeys = favApps.map { appKey(it) }.toSet()
+
+    LaunchedEffect(apps, libraryOnly, favorites, rows, cols) {
+        if (apps.isNotEmpty()) {
+            val placed = autoPlace(
+                apps, homeItems, folders, widgets, libraryOnly, dockKeys, pages, rows, cols
+            )
+            if (placed !== homeItems) saveHome(placed)
+        }
+    }
+
+    val contentPages = pagesNeeded(homeItems, pages)
+    val totalPages = contentPages + 1
 
     Box(Modifier.fillMaxSize()) {
         HomeScreen(
@@ -290,13 +305,17 @@ fun LauncherRoot(
             homeItems = homeItems,
             widgets = widgets,
             favApps = favApps,
-            pages = pages,
+            pages = contentPages,
+            totalPages = totalPages,
             rows = rows,
             cols = cols,
             switchIcon = switchIcon,
+            libraryOnly = libraryOnly,
+            onMoveToLibrary = { key -> saveLibrary(libraryOnly + key) },
+            onRestoreFromLibrary = { key -> saveLibrary(libraryOnly - key) },
             host = host,
             awm = awm,
-            onOpenDrawer = { drawerOpen = true },
+            onOpenSearch = { searchOpen = true },
             onLaunch = { launchApp(context, it) },
             onRemoveItem = { item ->
                 saveHome(homeItems - item)
@@ -313,7 +332,7 @@ fun LauncherRoot(
             onOpenFolder = { openFolderId = it },
             onMoveToPage = { item, delta ->
                 val target = item.page + delta
-                if (target in 0 until pages) {
+                if (target in 0 until contentPages) {
                     val cell = freeCellOnPage(homeItems, target, rows, cols)
                     if (cell != null && !cellCoveredByWidget(widgets, target, cell.first, cell.second)) {
                         saveHome(placeItem(homeItems, item, target, cell.first, cell.second))
@@ -331,7 +350,7 @@ fun LauncherRoot(
             },
             onWidgetToPage = { w, delta ->
                 val target = w.page + delta
-                if (target in 0 until pages) {
+                if (target in 0 until contentPages) {
                     saveWidgets(widgets.map { if (it == w) it.copy(page = target) else it })
                 }
             },
@@ -341,35 +360,22 @@ fun LauncherRoot(
             }
         )
         AnimatedVisibility(
-            visible = drawerOpen,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it }
+            visible = searchOpen,
+            enter = slideInVertically { -it },
+            exit = slideOutVertically { -it }
         ) {
-            AppDrawer(
+            SpotlightSearch(
                 apps = apps,
-                favorites = favorites,
                 onLaunch = {
                     launchApp(context, it)
-                    drawerOpen = false
+                    searchOpen = false
                 },
-                onToggleFavorite = { pkg -> toggleFavorite(pkg) },
-                onAddToHome = { app ->
-                    val cell = firstFreeCell(homeItems, pages, rows, cols, 0)
-                    if (cell != null && !cellCoveredByWidget(widgets, cell.first, cell.second, cell.third)) {
-                        saveHome(
-                            homeItems + HomeItem(
-                                cell.first, cell.second, cell.third,
-                                app.packageName, app.activityName
-                            )
-                        )
-                        drawerOpen = false
-                    }
-                },
-                onAppInfo = { pkg -> openAppInfo(context, pkg) }
+                onAppInfo = { pkg -> openAppInfo(context, pkg) },
+                onDismiss = { searchOpen = false }
             )
         }
     }
-    BackHandler(enabled = drawerOpen) { drawerOpen = false }
+    BackHandler(enabled = searchOpen) { searchOpen = false }
 
     val openFolder = folders.find { it.id == openFolderId }
     if (openFolder != null) {
@@ -482,23 +488,6 @@ fun expandNotifications(context: Context) {
     }
 }
 
-fun openClock(context: Context) {
-    val intent = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    if (runCatching { context.startActivity(intent) }.isFailure) {
-        Toast.makeText(context, "時計アプリを開けませんでした", Toast.LENGTH_SHORT).show()
-    }
-}
-
-fun openCalendar(context: Context) {
-    val uri = Uri.parse("content://com.android.calendar/time/" + System.currentTimeMillis())
-    val intent = Intent(Intent.ACTION_VIEW, uri)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    if (runCatching { context.startActivity(intent) }.isFailure) {
-        Toast.makeText(context, "カレンダーを開けませんでした", Toast.LENGTH_SHORT).show()
-    }
-}
-
 fun openLauncherChooser(context: Context) {
     val candidates = listOf(
         Intent(Settings.ACTION_HOME_SETTINGS),
@@ -540,12 +529,16 @@ fun HomeScreen(
     widgets: List<WidgetItem>,
     favApps: List<AppEntry>,
     pages: Int,
+    totalPages: Int,
     rows: Int,
     cols: Int,
     switchIcon: Boolean,
+    libraryOnly: Set<String>,
+    onMoveToLibrary: (String) -> Unit,
+    onRestoreFromLibrary: (String) -> Unit,
     host: AppWidgetHost,
     awm: AppWidgetManager,
-    onOpenDrawer: () -> Unit,
+    onOpenSearch: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onRemoveItem: (HomeItem) -> Unit,
     onMoveItem: (HomeItem, Int, Int) -> Unit,
@@ -562,15 +555,6 @@ fun HomeScreen(
     onOpenFolder: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var now by remember { mutableStateOf(Date()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = Date()
-            delay(1000)
-        }
-    }
-    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.JAPAN) }
-    val dateFmt = remember { SimpleDateFormat("M月d日 (E)", Locale.JAPAN) }
     var isDefault by remember { mutableStateOf(isDefaultHome(context)) }
     val roleLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -578,33 +562,19 @@ fun HomeScreen(
         isDefault = isDefaultHome(context)
     }
     var homeMenu by remember { mutableStateOf(false) }
-    val pagerState = rememberPagerState(pageCount = { pages })
+    val pagerState = rememberPagerState(pageCount = { totalPages })
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectVerticalDragGestures { _, dragAmount ->
-                    if (dragAmount < -20) onOpenDrawer()
-                    if (dragAmount > 20) expandNotifications(context)
+                    if (dragAmount > 20) onOpenSearch()
                 }
             }
-            .padding(top = 40.dp, bottom = 16.dp),
+            .padding(top = 48.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            timeFmt.format(now),
-            fontSize = 40.sp,
-            color = Color.White,
-            modifier = Modifier.clickable { openClock(context) }
-        )
-        Text(
-            dateFmt.format(now),
-            fontSize = 14.sp,
-            color = Color.White,
-            modifier = Modifier.clickable { openCalendar(context) }
-        )
-        Spacer(Modifier.height(8.dp))
 
         Box(
             Modifier
@@ -615,6 +585,16 @@ fun HomeScreen(
                 }
         ) {
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                if (page >= pages) {
+                    AppLibraryPage(
+                        apps = apps,
+                        onLaunch = onLaunch,
+                        onAppInfo = onAppInfo,
+                        libraryOnly = libraryOnly,
+                        onRestoreFromLibrary = onRestoreFromLibrary
+                    )
+                    return@HorizontalPager
+                }
                 WorkspacePage(
                     pageIndex = page,
                     pages = pages,
@@ -639,6 +619,7 @@ fun HomeScreen(
                     onWidgetToPage = onWidgetToPage,
                     folders = folders,
                     onOpenFolder = onOpenFolder,
+                    onMoveToLibrary = onMoveToLibrary,
                     resolveKey = { key ->
                         val i = key.lastIndexOf('/')
                         if (i <= 0) null else apps.find {
@@ -679,7 +660,7 @@ fun HomeScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(pages) { i ->
+            repeat(totalPages) { i ->
                 Box(
                     Modifier
                         .size(if (pagerState.currentPage == i) 8.dp else 6.dp)
@@ -700,10 +681,15 @@ fun HomeScreen(
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.White.copy(alpha = 0.16f))
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            favApps.take(5).forEach { app ->
+            favApps.take(4).forEach { app ->
                 var dockMenu by remember(app.packageName) { mutableStateOf(false) }
                 Box {
                     Image(
@@ -814,6 +800,7 @@ fun WorkspacePage(
     onWidgetToPage: (WidgetItem, Int) -> Unit,
     folders: List<FolderEntry>,
     onOpenFolder: (String) -> Unit,
+    onMoveToLibrary: (String) -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
     BoxWithConstraints(
@@ -966,6 +953,14 @@ fun WorkspacePage(
                                             }
                                         )
                                     } else if (app != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("App Libraryへ移動") },
+                                            onClick = {
+                                                menuFor = null
+                                                onMoveToLibrary(appKey(app))
+                                                onRemoveItem(item)
+                                            }
+                                        )
                                         DropdownMenuItem(
                                             text = { Text("アプリ情報") },
                                             onClick = {
@@ -1154,112 +1149,6 @@ fun WidgetEditDialog(
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun AppDrawer(
-    apps: List<AppEntry>,
-    favorites: List<String>,
-    onLaunch: (AppEntry) -> Unit,
-    onToggleFavorite: (String) -> Unit,
-    onAddToHome: (AppEntry) -> Unit,
-    onAppInfo: (String) -> Unit
-) {
-    var query by remember { mutableStateOf("") }
-    val filtered = if (query.isBlank()) apps
-    else apps.filter { it.label.contains(query, ignoreCase = true) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xF0101418))
-            .padding(horizontal = 12.dp)
-    ) {
-        Spacer(Modifier.height(40.dp))
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("アプリを検索") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    val first = filtered.firstOrNull()
-                    if (first != null) onLaunch(first)
-                }
-            ),
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = Color.White,
-                unfocusedBorderColor = Color.Gray,
-                focusedPlaceholderColor = Color.Gray,
-                unfocusedPlaceholderColor = Color.Gray,
-                cursorColor = Color.White
-            )
-        )
-        Spacer(Modifier.height(12.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            items(filtered, key = { it.packageName + "/" + it.activityName }) { app ->
-                val isFav = favorites.contains(app.packageName)
-                var menu by remember(app.packageName) { mutableStateOf(false) }
-                Box {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .combinedClickable(
-                                onClick = { onLaunch(app) },
-                                onLongClick = { menu = true }
-                            )
-                            .padding(4.dp)
-                    ) {
-                        Image(
-                            bitmap = app.icon,
-                            contentDescription = app.label,
-                            modifier = Modifier.size(52.dp)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = if (isFav) app.label + " ★" else app.label,
-                            fontSize = 11.sp,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("ホームに追加") },
-                            onClick = {
-                                menu = false
-                                onAddToHome(app)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (isFav) "お気に入りから外す" else "お気に入りに追加") },
-                            onClick = {
-                                menu = false
-                                onToggleFavorite(app.packageName)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("アプリ情報") },
-                            onClick = {
-                                menu = false
-                                onAppInfo(app.packageName)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable
 fun SettingsDialog(
     pages: Int,
@@ -1443,4 +1332,196 @@ fun FolderDialog(
             }
         }
     )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun AppLibraryPage(
+    apps: List<AppEntry>,
+    onLaunch: (AppEntry) -> Unit,
+    onAppInfo: (String) -> Unit,
+    libraryOnly: Set<String>,
+    onRestoreFromLibrary: (String) -> Unit
+) {
+    val groups = remember(apps) {
+        apps.groupBy { categoryLabel(it.category) }
+            .toList()
+            .sortedWith(compareBy({ it.first == "その他" }, { it.first }))
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp)
+    ) {
+        Text(
+            "App Library",
+            fontSize = 20.sp,
+            color = Color.White,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(groups.size) { gi ->
+                val name = groups[gi].first
+                val list = groups[gi].second
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .padding(10.dp)
+                ) {
+                    Text(name, fontSize = 12.sp, color = Color.White)
+                    Spacer(Modifier.height(6.dp))
+                    val rowsOfApps = list.chunked(4)
+                    rowsOfApps.take(2).forEach { chunk ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        ) {
+                            chunk.forEach { app ->
+                                var menu by remember(app.packageName) { mutableStateOf(false) }
+                                Box {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .width(64.dp)
+                                            .combinedClickable(
+                                                onClick = { onLaunch(app) },
+                                                onLongClick = { menu = true }
+                                            )
+                                    ) {
+                                        Image(
+                                            bitmap = app.icon,
+                                            contentDescription = app.label,
+                                            modifier = Modifier.size(44.dp)
+                                        )
+                                        Text(
+                                            app.label,
+                                            fontSize = 9.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = menu,
+                                        onDismissRequest = { menu = false }
+                                    ) {
+                                        if (libraryOnly.contains(appKey(app))) {
+                                            DropdownMenuItem(
+                                                text = { Text("ホーム画面に追加") },
+                                                onClick = {
+                                                    menu = false
+                                                    onRestoreFromLibrary(appKey(app))
+                                                }
+                                            )
+                                        }
+                                        DropdownMenuItem(
+                                            text = { Text("アプリ情報") },
+                                            onClick = {
+                                                menu = false
+                                                onAppInfo(app.packageName)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (list.size > 8) {
+                        Text(
+                            "ほか " + (list.size - 8) + " 件",
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun SpotlightSearch(
+    apps: List<AppEntry>,
+    onLaunch: (AppEntry) -> Unit,
+    onAppInfo: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val results = if (query.isBlank()) emptyList()
+    else apps.filter { it.label.contains(query, ignoreCase = true) }.take(24)
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xE60B0D10))
+            .padding(horizontal = 16.dp)
+    ) {
+        Spacer(Modifier.height(48.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("検索") },
+            singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    val first = results.firstOrNull()
+                    if (first != null) onLaunch(first)
+                }
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color.White.copy(alpha = 0.5f),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                focusedPlaceholderColor = Color.Gray,
+                unfocusedPlaceholderColor = Color.Gray,
+                cursorColor = Color.White
+            )
+        )
+        Spacer(Modifier.height(12.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(results.size) { i ->
+                val app = results[i]
+                var menu by remember(app.packageName) { mutableStateOf(false) }
+                Box {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = { onLaunch(app) },
+                                onLongClick = { menu = true }
+                            )
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Image(
+                            bitmap = app.icon,
+                            contentDescription = app.label,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(app.label, fontSize = 15.sp, color = Color.White)
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("アプリ情報") },
+                            onClick = {
+                                menu = false
+                                onAppInfo(app.packageName)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+    }
 }

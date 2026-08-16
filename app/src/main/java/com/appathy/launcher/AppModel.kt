@@ -2,17 +2,15 @@ package com.appathy.launcher
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.Drawable
+import android.content.pm.ApplicationInfo
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 
 data class AppEntry(
     val label: String,
     val packageName: String,
     val activityName: String,
-    val icon: ImageBitmap
+    val icon: ImageBitmap,
+    val category: Int
 )
 
 data class HomeItem(
@@ -22,14 +20,6 @@ data class HomeItem(
     val packageName: String,
     val activityName: String
 )
-
-fun Drawable.toImageBitmap(sizePx: Int): ImageBitmap {
-    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bmp)
-    setBounds(0, 0, sizePx, sizePx)
-    draw(canvas)
-    return bmp.asImageBitmap()
-}
 
 fun loadApps(context: Context): List<AppEntry> {
     val pm = context.packageManager
@@ -41,10 +31,90 @@ fun loadApps(context: Context): List<AppEntry> {
                 label = it.loadLabel(pm).toString(),
                 packageName = it.activityInfo.packageName,
                 activityName = it.activityInfo.name,
-                icon = it.loadIcon(pm).toImageBitmap(128)
+                icon = it.loadIcon(pm).toSquircleBitmap(160),
+                category = it.activityInfo.applicationInfo.category
             )
         }
         .sortedBy { it.label.lowercase() }
+}
+
+fun categoryLabel(category: Int): String = when (category) {
+    ApplicationInfo.CATEGORY_GAME -> "ゲーム"
+    ApplicationInfo.CATEGORY_AUDIO -> "ミュージック"
+    ApplicationInfo.CATEGORY_VIDEO -> "ビデオ"
+    ApplicationInfo.CATEGORY_IMAGE -> "写真"
+    ApplicationInfo.CATEGORY_SOCIAL -> "ソーシャル"
+    ApplicationInfo.CATEGORY_NEWS -> "ニュース"
+    ApplicationInfo.CATEGORY_MAPS -> "マップ"
+    ApplicationInfo.CATEGORY_PRODUCTIVITY -> "仕事効率化"
+    ApplicationInfo.CATEGORY_ACCESSIBILITY -> "ユーティリティ"
+    else -> "その他"
+}
+
+object LibraryApps {
+    private const val PREF = "launcher_prefs"
+    private const val KEY = "library_only"
+
+    fun load(context: Context): Set<String> =
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString(KEY, "")!!.split(";").filter { it.isNotBlank() }.toSet()
+
+    fun save(context: Context, keys: Set<String>) {
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putString(KEY, keys.joinToString(";")).apply()
+    }
+}
+
+fun pagesNeeded(items: List<HomeItem>, minPages: Int): Int {
+    val maxPage = items.maxOfOrNull { it.page } ?: 0
+    return maxOf(minPages, maxPage + 1)
+}
+
+fun autoPlace(
+    apps: List<AppEntry>,
+    items: List<HomeItem>,
+    folders: List<FolderEntry>,
+    widgets: List<WidgetItem>,
+    libraryOnly: Set<String>,
+    dockKeys: Set<String>,
+    minPages: Int,
+    rows: Int,
+    cols: Int
+): List<HomeItem> {
+    val inFolders = folders.flatMap { it.apps }.toSet()
+    val placed = items.filter { it.packageName != FOLDER_PKG }.map { appKey(it) }.toSet()
+    val missing = apps
+        .map { appKey(it) }
+        .filter { it !in placed && it !in inFolders && it !in libraryOnly && it !in dockKeys }
+
+    if (missing.isEmpty()) return items
+
+    var result = items
+    var page = 0
+    var row = 0
+    var col = 0
+    for (key in missing) {
+        var found = false
+        while (!found) {
+            val taken = result.any { it.page == page && it.row == row && it.col == col } ||
+                cellCoveredByWidget(widgets, page, row, col)
+            if (!taken) {
+                val placedItem = keyToItem(key, page, row, col)
+                if (placedItem != null) result = result + placedItem
+                found = true
+            }
+            col += 1
+            if (col >= cols) {
+                col = 0
+                row += 1
+            }
+            if (row >= rows) {
+                row = 0
+                page += 1
+            }
+        }
+    }
+    return result
 }
 
 object Favorites {
