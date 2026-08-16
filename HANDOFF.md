@@ -157,3 +157,8 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - blur は Android 12 以上でのみ効き、それ未満は無視される（暗幕があるので見た目は破綻しない）。壁紙はシステム側の描画なのでぼけない
 - Dock の上に iOS 風の「検索」ピルを追加。タップで Spotlight 風検索を開く（下スワイプと同じ動作）
 - BackHandler は 3系統: 検索 → 編集モード → フォルダ
+
+## v2.0.1（ビルド修正・CI整理）
+- v2.0 のコンパイルエラーを修正: AppLibraryPage の `@OptIn(ExperimentalFoundationApi::class)` が消えていた（FolderDialog を FolderOverlay に置換した際、直後にあった OptIn 行まで削除範囲に入っていた）
+- build.yml を `on: workflow_dispatch:` のみに変更。push では走らせず、配布は release.yml のタグ起動に一本化
+- 恒久ルール: build.yml は push トリガーを持たない。upload-artifact も入れない

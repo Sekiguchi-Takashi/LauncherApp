@@ -1478,6 +1478,7 @@ fun FolderOverlay(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppLibraryPage(
     apps: List<AppEntry>,
