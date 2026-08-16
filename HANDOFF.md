@@ -9,7 +9,7 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - パッケージ: com.appathy.launcher
 - Kotlin 2.0.20 / AGP 8.5.2 / compileSdk 34 / minSdk 26 / Compose (BOM 2024.09.00)
 - app/debug.keystore 固定（上書きインストール可）
-- ビルド: GitHub Actions。build.yml はコンパイル確認のみ（Artifacts は出さない）、配布APKは release.yml がタグ push で作る Release から取得
+- ビルド: GitHub Actions の release.yml のみ。タグ push で起動し Release に APK を添付する。build.yml は同梱しない
 - リポジトリ: Sekiguchi-Takashi/LauncherApp (private)
 
 ## ファイル
@@ -162,3 +162,11 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - v2.0 のコンパイルエラーを修正: AppLibraryPage の `@OptIn(ExperimentalFoundationApi::class)` が消えていた（FolderDialog を FolderOverlay に置換した際、直後にあった OptIn 行まで削除範囲に入っていた）
 - build.yml を `on: workflow_dispatch:` のみに変更。push では走らせず、配布は release.yml のタグ起動に一本化
 - 恒久ルール: build.yml は push トリガーを持たない。upload-artifact も入れない
+
+## v2.0.2（CI・deploy.sh の信頼性向上）
+- build.yml をリポジトリから削除。CI は release.yml のタグ起動のみ。以後の納品物にも build.yml は含めない
+- deploy.sh のタグ対象 SHA を API 取得（`git/ref/heads/main`）から `git rev-parse HEAD` に変更
+  - 理由: push 直後に API を叩くと GitHub 側の反映待ちで「ひとつ前のコミット」にタグが付くことがあり、実際に v1.8.4 が修正前のコミットを指してビルドが落ちた
+  - ローカルの HEAD を使えば、push した内容と必ず一致する
+- FolderOverlay の LazyVerticalGrid に `heightIn(max = 420.dp)` を追加
+  - 補足: 親の Column はスクロール可能ではないため高さは無限にならず、クラッシュはしない。中身の多いフォルダでカードが画面外へ伸びるのを防ぐための上限
