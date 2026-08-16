@@ -133,3 +133,7 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 ## v1.8.1（ビルド修正）
 - v1.8 のコンパイルエラーを修正: ページ下部のヒント文言に `onOpenDrawer()` の参照が残っていた（HomeScreen のパラメータは onOpenSearch に改名済みだった）。ドロワー廃止に伴いヒント文言ごと削除
 - 併せて未使用になった expandNotifications を削除（下スワイプは Spotlight 検索に割り当て済み）
+
+## v1.8.2（ビルド修正）
+- v1.8.1 で openLauncherChooser() を巻き添え削除していたため復元。未使用の expandNotifications を削除した際、直後に定義されていた openLauncherChooser まで削除範囲に入っていた
+- 教訓: 関数を削除するときは「次の関数定義まで」で範囲を切らず、対象関数の本体だけを消す
