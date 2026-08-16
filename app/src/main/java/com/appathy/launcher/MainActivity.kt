@@ -68,7 +68,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -92,11 +91,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -176,6 +176,8 @@ fun LauncherRoot(
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     var searchOpen by remember { mutableStateOf(false) }
     var editMode by remember { mutableStateOf(false) }
+    var settingsAppOpen by remember { mutableStateOf(false) }
+    var settingsTileHidden by remember { mutableStateOf(SettingsTile.hidden(context)) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -185,9 +187,7 @@ fun LauncherRoot(
     var pages by remember { mutableStateOf(LauncherSettings.pages(context)) }
     var rows by remember { mutableStateOf(LauncherSettings.rows(context)) }
     var cols by remember { mutableStateOf(LauncherSettings.cols(context)) }
-    var switchIcon by remember { mutableStateOf(LauncherSettings.switchIcon(context)) }
     var iconStyle by remember { mutableStateOf(LauncherSettings.iconStyle(context)) }
-    var showSettings by remember { mutableStateOf(false) }
     var showWidgetPicker by remember { mutableStateOf(false) }
     var editWidgetId by remember { mutableStateOf<Int?>(null) }
     var pendingWidgetId by remember { mutableStateOf(-1) }
@@ -311,11 +311,16 @@ fun LauncherRoot(
     val favApps = favorites.mapNotNull { pkg -> apps.find { it.packageName == pkg } }
     val dockKeys = favApps.map { appKey(it) }.toSet()
 
-    LaunchedEffect(apps, libraryOnly, favorites, rows, cols) {
+    LaunchedEffect(apps, libraryOnly, favorites, rows, cols, settingsTileHidden) {
         if (apps.isNotEmpty()) {
-            val placed = autoPlace(
+            var placed = autoPlace(
                 apps, homeItems, folders, widgets, libraryOnly, dockKeys, pages, rows, cols
             )
+            if (!settingsTileHidden) {
+                placed = ensureSettingsTile(
+                    placed, widgets, pagesNeeded(placed, pages), rows, cols
+                )
+            }
             if (placed !== homeItems) saveHome(placed)
         }
     }
@@ -341,7 +346,6 @@ fun LauncherRoot(
             totalPages = totalPages,
             rows = rows,
             cols = cols,
-            switchIcon = switchIcon,
             libraryOnly = libraryOnly,
             editMode = editMode,
             onEnterEdit = { editMode = true },
@@ -356,6 +360,10 @@ fun LauncherRoot(
                 saveHome(homeItems - item)
                 if (item.packageName == FOLDER_PKG) {
                     saveFolders(folders.filter { it.id != item.activityName })
+                }
+                if (item.packageName == SETTINGS_PKG) {
+                    settingsTileHidden = true
+                    SettingsTile.setHidden(context, true)
                 }
             },
             onMoveItem = { item, r, c ->
@@ -376,7 +384,13 @@ fun LauncherRoot(
             },
             onAppInfo = { pkg -> openAppInfo(context, pkg) },
             onToggleFavorite = { pkg -> toggleFavorite(pkg) },
-            onOpenSettings = { showSettings = true },
+            onOpenSettings = { settingsAppOpen = true },
+            onOpenSettingsApp = { settingsAppOpen = true },
+            settingsTileHidden = settingsTileHidden,
+            onRestoreSettingsTile = {
+                settingsTileHidden = false
+                SettingsTile.setHidden(context, false)
+            },
             onAddWidget = { showWidgetPicker = true },
             onEditWidget = { editWidgetId = it.widgetId },
             onDeleteWidget = { w ->
@@ -389,10 +403,6 @@ fun LauncherRoot(
                     saveWidgets(widgets.map { if (it == w) it.copy(page = target) else it })
                 }
             },
-            onHideSwitchIcon = {
-                switchIcon = false
-                LauncherSettings.setSwitchIcon(context, false)
-            }
         )
         }
         AnimatedVisibility(
@@ -448,23 +458,43 @@ fun LauncherRoot(
     BackHandler(enabled = searchOpen) { searchOpen = false }
     BackHandler(enabled = editMode && !searchOpen) { editMode = false }
     BackHandler(enabled = folderOpen) { openFolderId = null }
+    BackHandler(enabled = settingsAppOpen) { settingsAppOpen = false }
 
-    if (showSettings) {
-        SettingsDialog(
+    if (settingsAppOpen) {
+        SettingsApp(
             pages = pages,
             rows = rows,
             cols = cols,
-            switchIcon = switchIcon,
+            iconStyle = iconStyle,
+            libraryOnly = libraryOnly,
+            settingsTileHidden = settingsTileHidden,
+            apps = apps,
+            isDefaultHomeNow = isDefaultHome(context),
             onPages = { pages = it; LauncherSettings.setPages(context, it) },
             onRows = { rows = it; LauncherSettings.setRows(context, it) },
             onCols = { cols = it; LauncherSettings.setCols(context, it) },
-            onSwitchIcon = { switchIcon = it; LauncherSettings.setSwitchIcon(context, it) },
-            iconStyle = iconStyle,
             onIconStyle = {
                 iconStyle = it
                 LauncherSettings.setIconStyle(context, it)
             },
-            onDismiss = { showSettings = false }
+            onRestoreFromLibrary = { key -> saveLibrary(libraryOnly - key) },
+            onRestoreSettingsTile = {
+                settingsTileHidden = false
+                SettingsTile.setHidden(context, false)
+            },
+            onEnterEdit = { editMode = true },
+            onAddWidget = { showWidgetPicker = true },
+            onRequestDefaultHome = { openLauncherChooser(context) },
+            onOpenHomeSettings = { openLauncherChooser(context) },
+            onChangeWallpaper = {
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_SET_WALLPAPER)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            },
+            onDismiss = { settingsAppOpen = false }
         )
     }
 
@@ -567,7 +597,6 @@ fun HomeScreen(
     totalPages: Int,
     rows: Int,
     cols: Int,
-    switchIcon: Boolean,
     libraryOnly: Set<String>,
     editMode: Boolean,
     onEnterEdit: () -> Unit,
@@ -584,11 +613,13 @@ fun HomeScreen(
     onAppInfo: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSettingsApp: () -> Unit,
+    settingsTileHidden: Boolean,
+    onRestoreSettingsTile: () -> Unit,
     onAddWidget: () -> Unit,
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
-    onHideSwitchIcon: () -> Unit,
     folders: List<FolderEntry>,
     onOpenFolder: (String) -> Unit
 ) {
@@ -663,6 +694,7 @@ fun HomeScreen(
                     onMoveToLibrary = onMoveToLibrary,
                     editMode = editMode,
                     onEnterEdit = onEnterEdit,
+                    onOpenSettingsApp = onOpenSettingsApp,
                     resolveKey = { key ->
                         val i = key.lastIndexOf('/')
                         if (i <= 0) null else apps.find {
@@ -678,6 +710,29 @@ fun HomeScreen(
                     onClick = {
                         homeMenu = false
                         onEnterEdit()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("検索") },
+                    onClick = {
+                        homeMenu = false
+                        onOpenSearch()
+                    }
+                )
+                if (!isDefault) {
+                    DropdownMenuItem(
+                        text = { Text("デフォルトのホームに設定") },
+                        onClick = {
+                            homeMenu = false
+                            requestDefaultHome(context, roleLauncher)
+                        }
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("ホーム設定を開く") },
+                    onClick = {
+                        homeMenu = false
+                        openLauncherChooser(context)
                     }
                 )
                 DropdownMenuItem(
@@ -724,41 +779,23 @@ fun HomeScreen(
         }
         Spacer(Modifier.height(12.dp))
 
-        if (!isDefault) {
-            TextButton(onClick = { requestDefaultHome(context, roleLauncher) }) {
-                Text("デフォルトのホームに設定", color = Color.White)
-            }
-        }
-
+        if (favApps.isNotEmpty()) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.28f))
-                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
-                .clickable { onOpenSearch() }
-                .padding(horizontal = 14.dp, vertical = 5.dp)
-        ) {
-            Text("検索", fontSize = 12.sp, color = Color.White)
-        }
-        Spacer(Modifier.height(10.dp))
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .padding(horizontal = 12.dp)
-                .clip(RoundedCornerShape(28.dp))
+                .clip(RoundedCornerShape(30.dp))
                 .background(Color.White.copy(alpha = 0.16f))
-                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(28.dp))
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(30.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             favApps.take(4).forEach { app ->
                 var dockMenu by remember(app.packageName) { mutableStateOf(false) }
                 Box {
                     AppIcon(
                         app = app,
-                        size = 56.dp,
+                        size = 60.dp,
                         modifier = Modifier.pointerInput(app.packageName) {
                             detectTapGestures(
                                 onTap = { onLaunch(app) },
@@ -784,52 +821,7 @@ fun HomeScreen(
                     }
                 }
             }
-            if (switchIcon) {
-                var switchMenu by remember { mutableStateOf(false) }
-                Box {
-                    Image(
-                        painter = painterResource(R.drawable.ic_switch_home),
-                        contentDescription = "ランチャー切替",
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = { openLauncherChooser(context) },
-                                    onLongPress = { switchMenu = true }
-                                )
-                            }
-                            .padding(10.dp)
-                    )
-                    DropdownMenu(
-                        expanded = switchMenu,
-                        onDismissRequest = { switchMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("ホーム設定を開く") },
-                            onClick = {
-                                switchMenu = false
-                                openLauncherChooser(context)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("このランチャーを既定にする") },
-                            onClick = {
-                                switchMenu = false
-                                requestDefaultHome(context, roleLauncher)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("このアイコンを隠す") },
-                            onClick = {
-                                switchMenu = false
-                                onHideSwitchIcon()
-                            }
-                        )
-                    }
-                }
-            }
+        }
         }
     }
 }
@@ -858,6 +850,7 @@ fun WorkspacePage(
     onMoveToLibrary: (String) -> Unit,
     editMode: Boolean,
     onEnterEdit: () -> Unit,
+    onOpenSettingsApp: () -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
     BoxWithConstraints(
@@ -899,12 +892,13 @@ fun WorkspacePage(
                         ) {
                             val item = items.find { it.row == r && it.col == c }
                             val isFolder = item != null && item.packageName == FOLDER_PKG
+                            val isSettings = item != null && item.packageName == SETTINGS_PKG
                             val folder = if (isFolder) {
                                 folders.find { it.id == item!!.activityName }
                             } else null
-                            val app = if (isFolder) null else item?.let { resolve(it) }
+                            val app = if (isFolder || isSettings) null else item?.let { resolve(it) }
                             val visible = item != null && item != dragItem &&
-                                (app != null || folder != null)
+                                (app != null || folder != null || isSettings)
                             if (item != null && visible) {
                                 val phase = if ((r + c) % 2 == 0) 1f else -1f
                                 Box {
@@ -915,7 +909,9 @@ fun WorkspacePage(
                                             rotationZ = if (editMode) wiggleAngle * phase else 0f
                                         }
                                         .clickable(enabled = !editMode) {
-                                            if (folder != null) {
+                                            if (isSettings) {
+                                                onOpenSettingsApp()
+                                            } else if (folder != null) {
                                                 onOpenFolder(folder.id)
                                             } else if (app != null) {
                                                 onLaunch(app)
@@ -986,20 +982,28 @@ fun WorkspacePage(
                                             )
                                         }
                                 ) {
-                                    if (folder != null) {
+                                    if (isSettings) {
+                                        SettingsTileIcon()
+                                        Text(
+                                            "設定",
+                                            fontSize = 11.sp,
+                                            color = Color.White,
+                                            maxLines = 1
+                                        )
+                                    } else if (folder != null) {
                                         FolderIcon(folder = folder, resolve = resolveKey)
                                         Text(
                                             folder.name,
-                                            fontSize = 10.sp,
+                                            fontSize = 11.sp,
                                             color = Color.White,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     } else if (app != null) {
-                                        AppIcon(app = app, size = 48.dp)
+                                        AppIcon(app = app, size = 60.dp)
                                         Text(
                                             app.label,
-                                            fontSize = 10.sp,
+                                            fontSize = 11.sp,
                                             color = Color.White,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1029,7 +1033,7 @@ fun WorkspacePage(
                                 }
                                 }
                             }
-                            if (item != null && (app != null || folder != null)) {
+                            if (item != null && (app != null || folder != null || isSettings)) {
                                 DropdownMenu(
                                     expanded = menuFor == item,
                                     onDismissRequest = { menuFor = null }
@@ -1055,8 +1059,11 @@ fun WorkspacePage(
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                if (folder != null) "フォルダを削除"
-                                                else "ホームから削除"
+                                                when {
+                                                    folder != null -> "フォルダを削除"
+                                                    isSettings -> "設定アイコンを隠す"
+                                                    else -> "ホームから削除"
+                                                }
                                             )
                                         },
                                         onClick = {
@@ -1195,7 +1202,7 @@ fun WorkspacePage(
                 if (dragFolder != null) {
                     FolderIcon(folder = dragFolder, resolve = resolveKey)
                 } else if (dragApp != null) {
-                    AppIcon(app = dragApp, size = 56.dp)
+                    AppIcon(app = dragApp, size = 68.dp)
                 }
             }
         }
@@ -1273,77 +1280,6 @@ fun WidgetEditDialog(
 }
 
 @Composable
-fun SettingsDialog(
-    pages: Int,
-    rows: Int,
-    cols: Int,
-    switchIcon: Boolean,
-    iconStyle: IconStyle,
-    onPages: (Int) -> Unit,
-    onRows: (Int) -> Unit,
-    onCols: (Int) -> Unit,
-    onSwitchIcon: (Boolean) -> Unit,
-    onIconStyle: (IconStyle) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("閉じる") }
-        },
-        title = { Text("設定") },
-        text = {
-            Column {
-                SettingRow("ページ数", pages, 1, 5, onPages)
-                SettingRow("グリッド行数", rows, 3, 8, onRows)
-                SettingRow("グリッド列数", cols, 3, 6, onCols)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("ランチャー切替アイコン", modifier = Modifier.weight(1f))
-                    Switch(checked = switchIcon, onCheckedChange = onSwitchIcon)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("アイコンの外観")
-                IconStyle.entries.forEach { style ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onIconStyle(style) }
-                            .padding(vertical = 6.dp)
-                    ) {
-                        Text(if (style == iconStyle) "●" else "○")
-                        Spacer(Modifier.width(8.dp))
-                        Text(iconStyleLabel(style))
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun SettingRow(
-    label: String,
-    value: Int,
-    min: Int,
-    max: Int,
-    onChange: (Int) -> Unit
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(label, modifier = Modifier.weight(1f))
-        TextButton(onClick = { if (value > min) onChange(value - 1) }) { Text("−") }
-        Text(value.toString(), modifier = Modifier.width(28.dp), textAlign = TextAlign.Center)
-        TextButton(onClick = { if (value < max) onChange(value + 1) }) { Text("＋") }
-    }
-}
-
-@Composable
 fun FolderIcon(
     folder: FolderEntry,
     resolve: (String) -> AppEntry?
@@ -1351,8 +1287,8 @@ fun FolderIcon(
     val shown = folder.apps.mapNotNull { resolve(it) }.take(4)
     Box(
         Modifier
-            .size(48.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .size(60.dp)
+            .clip(RoundedCornerShape(15.dp))
             .background(Color.White.copy(alpha = 0.2f))
             .padding(4.dp)
     ) {
@@ -1369,7 +1305,7 @@ fun FolderIcon(
                         Box(Modifier.weight(1f).fillMaxHeight()) {
                             val entry = shown.getOrNull(r * 2 + c)
                             if (entry != null) {
-                                AppIcon(app = entry, size = 18.dp)
+                                AppIcon(app = entry, size = 23.dp)
                             }
                         }
                     }
@@ -1712,5 +1648,217 @@ fun AppIcon(
                 .clip(RoundedCornerShape(size * 0.225f))
                 .background(Color.White.copy(alpha = 0.12f))
         )
+    }
+}
+
+@Composable
+fun SettingsTileIcon(size: Dp = 60.dp) {
+    Box(
+        Modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.235f))
+            .background(Color(0xFF6E6E73)),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_settings_app),
+            contentDescription = "設定",
+            modifier = Modifier.size(size * 0.62f)
+        )
+    }
+}
+
+@Composable
+fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Text(
+        title,
+        fontSize = 12.sp,
+        color = Color.White.copy(alpha = 0.6f),
+        modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+    ) {
+        content()
+    }
+    Spacer(Modifier.height(20.dp))
+}
+
+@Composable
+fun SettingsRow(
+    label: String,
+    value: String? = null,
+    onClick: (() -> Unit)? = null,
+    trailing: @Composable (() -> Unit)? = null
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+    ) {
+        Text(label, fontSize = 15.sp, color = Color.White, modifier = Modifier.weight(1f))
+        if (value != null) {
+            Text(value, fontSize = 14.sp, color = Color.White.copy(alpha = 0.6f))
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(8.dp))
+            trailing()
+        }
+        if (onClick != null && trailing == null) {
+            Spacer(Modifier.width(8.dp))
+            Text("›", fontSize = 18.sp, color = Color.White.copy(alpha = 0.5f))
+        }
+    }
+}
+
+@Composable
+fun SettingsStepperRow(
+    label: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    onChange: (Int) -> Unit
+) {
+    SettingsRow(
+        label = label,
+        trailing = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { if (value > min) onChange(value - 1) }) {
+                    Text("−", color = Color.White, fontSize = 18.sp)
+                }
+                Text(
+                    value.toString(),
+                    color = Color.White,
+                    modifier = Modifier.width(24.dp),
+                    textAlign = TextAlign.Center
+                )
+                TextButton(onClick = { if (value < max) onChange(value + 1) }) {
+                    Text("＋", color = Color.White, fontSize = 18.sp)
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun SettingsApp(
+    pages: Int,
+    rows: Int,
+    cols: Int,
+    iconStyle: IconStyle,
+    libraryOnly: Set<String>,
+    settingsTileHidden: Boolean,
+    apps: List<AppEntry>,
+    isDefaultHomeNow: Boolean,
+    onPages: (Int) -> Unit,
+    onRows: (Int) -> Unit,
+    onCols: (Int) -> Unit,
+    onIconStyle: (IconStyle) -> Unit,
+    onRestoreFromLibrary: (String) -> Unit,
+    onRestoreSettingsTile: () -> Unit,
+    onEnterEdit: () -> Unit,
+    onAddWidget: () -> Unit,
+    onRequestDefaultHome: () -> Unit,
+    onOpenHomeSettings: () -> Unit,
+    onChangeWallpaper: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val version = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "-"
+    }
+    val hiddenApps = apps.filter { libraryOnly.contains(appKey(it)) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xF20B0D10))
+            .padding(horizontal = 16.dp)
+    ) {
+        Spacer(Modifier.height(44.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("設定", fontSize = 28.sp, color = Color.White, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        LazyColumn {
+            item {
+                SettingsSection("アイコンの外観") {
+                    IconStyle.entries.forEach { style ->
+                        SettingsRow(
+                            label = iconStyleLabel(style),
+                            trailing = {
+                                Text(
+                                    if (style == iconStyle) "✓" else "",
+                                    color = Color(0xFF7FA6D8),
+                                    fontSize = 16.sp
+                                )
+                            },
+                            onClick = { onIconStyle(style) }
+                        )
+                    }
+                }
+            }
+            item {
+                SettingsSection("ホーム画面") {
+                    SettingsStepperRow("最小ページ数", pages, 1, 5, onPages)
+                    SettingsStepperRow("グリッド行数", rows, 3, 8, onRows)
+                    SettingsStepperRow("グリッド列数", cols, 3, 6, onCols)
+                    SettingsRow(label = "ホーム画面を編集", onClick = {
+                        onDismiss()
+                        onEnterEdit()
+                    })
+                    SettingsRow(label = "ウィジェットを追加", onClick = {
+                        onDismiss()
+                        onAddWidget()
+                    })
+                    if (settingsTileHidden) {
+                        SettingsRow(label = "設定アイコンをホームに戻す", onClick = onRestoreSettingsTile)
+                    }
+                }
+            }
+            item {
+                SettingsSection("壁紙とシステム") {
+                    SettingsRow(label = "壁紙を変更", onClick = onChangeWallpaper)
+                    SettingsRow(
+                        label = "デフォルトのホーム",
+                        value = if (isDefaultHomeNow) "このアプリ" else "他のアプリ",
+                        onClick = if (isDefaultHomeNow) null else onRequestDefaultHome
+                    )
+                    SettingsRow(label = "ホーム設定を開く", onClick = onOpenHomeSettings)
+                }
+            }
+            item {
+                SettingsSection("App Library のみに置いたアプリ") {
+                    if (hiddenApps.isEmpty()) {
+                        SettingsRow(label = "なし", value = "0 件")
+                    } else {
+                        hiddenApps.forEach { app ->
+                            SettingsRow(
+                                label = app.label,
+                                value = "ホームに戻す",
+                                onClick = { onRestoreFromLibrary(appKey(app)) }
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                SettingsSection("情報") {
+                    SettingsRow(label = "アプリ数", value = apps.size.toString() + " 件")
+                    SettingsRow(label = "バージョン", value = version)
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
     }
 }

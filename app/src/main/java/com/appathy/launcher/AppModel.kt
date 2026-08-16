@@ -62,6 +62,38 @@ object LibraryApps {
     }
 }
 
+fun ensureSettingsTile(
+    items: List<HomeItem>,
+    widgets: List<WidgetItem>,
+    pages: Int,
+    rows: Int,
+    cols: Int
+): List<HomeItem> {
+    if (items.any { it.packageName == SETTINGS_PKG }) return items
+    for (p in 0 until pages) {
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val taken = items.any { it.page == p && it.row == r && it.col == c } ||
+                    cellCoveredByWidget(widgets, p, r, c)
+                if (!taken) return items + HomeItem(p, r, c, SETTINGS_PKG, "settings")
+            }
+        }
+    }
+    return items
+}
+
+object SettingsTile {
+    private const val PREF = "launcher_prefs"
+    private const val KEY = "settings_tile_hidden"
+
+    fun hidden(context: Context): Boolean =
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getBoolean(KEY, false)
+
+    fun setHidden(context: Context, v: Boolean) =
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY, v).apply()
+}
+
 fun pagesNeeded(items: List<HomeItem>, minPages: Int): Int {
     val maxPage = items.maxOfOrNull { it.page } ?: 0
     return maxOf(minPages, maxPage + 1)
@@ -79,7 +111,9 @@ fun autoPlace(
     cols: Int
 ): List<HomeItem> {
     val inFolders = folders.flatMap { it.apps }.toSet()
-    val placed = items.filter { it.packageName != FOLDER_PKG }.map { appKey(it) }.toSet()
+    val placed = items
+        .filter { it.packageName != FOLDER_PKG && it.packageName != SETTINGS_PKG }
+        .map { appKey(it) }.toSet()
     val missing = apps
         .map { appKey(it) }
         .filter { it !in placed && it !in inFolders && it !in libraryOnly && it !in dockKeys }
@@ -243,6 +277,7 @@ fun freeRegion(
 }
 
 const val FOLDER_PKG = "__folder__"
+const val SETTINGS_PKG = "__settings__"
 
 data class FolderEntry(
     val id: String,
