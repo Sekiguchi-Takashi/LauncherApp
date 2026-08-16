@@ -479,28 +479,6 @@ fun openAppInfo(context: Context, packageName: String) {
     runCatching { context.startActivity(intent) }
 }
 
-fun expandNotifications(context: Context) {
-    runCatching {
-        val service = context.getSystemService("statusbar")
-        Class.forName("android.app.StatusBarManager")
-            .getMethod("expandNotificationsPanel")
-            .invoke(service)
-    }
-}
-
-fun openLauncherChooser(context: Context) {
-    val candidates = listOf(
-        Intent(Settings.ACTION_HOME_SETTINGS),
-        Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS"),
-        Intent(Settings.ACTION_SETTINGS)
-    )
-    for (intent in candidates) {
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (runCatching { context.startActivity(intent) }.isSuccess) return
-    }
-    Toast.makeText(context, "ホーム設定を開けませんでした", Toast.LENGTH_SHORT).show()
-}
-
 fun isDefaultHome(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         val rm = context.getSystemService(RoleManager::class.java)
@@ -769,13 +747,6 @@ fun HomeScreen(
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "△ 上にスワイプでアプリ一覧",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.7f),
-            modifier = Modifier.clickable { onOpenDrawer() }
-        )
     }
 }
 

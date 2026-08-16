@@ -129,3 +129,7 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - ジェスチャー変更: 下スワイプ = Spotlight風検索（全画面）。通知シェードは画面最上端からのシステムジェスチャーに任せる。上スワイプのドロワー起動は廃止
 - セル長押しメニューに「App Libraryへ移動」を追加
 - 注意: 旧 AppDrawer と expandNotifications 経路は削除済み。設定の「ページ数」は最小ページ数として機能する
+
+## v1.8.1（ビルド修正）
+- v1.8 のコンパイルエラーを修正: ページ下部のヒント文言に `onOpenDrawer()` の参照が残っていた（HomeScreen のパラメータは onOpenSearch に改名済みだった）。ドロワー廃止に伴いヒント文言ごと削除
+- 併せて未使用になった expandNotifications を削除（下スワイプは Spotlight 検索に割り当て済み）
