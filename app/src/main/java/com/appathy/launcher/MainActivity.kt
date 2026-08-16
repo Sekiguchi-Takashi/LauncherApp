@@ -32,6 +32,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -72,12 +73,14 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -161,6 +164,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+val LocalIconStyle = staticCompositionLocalOf { IconStyle.DEFAULT }
+
 @Composable
 fun LauncherRoot(
     apps: List<AppEntry>,
@@ -181,6 +186,7 @@ fun LauncherRoot(
     var rows by remember { mutableStateOf(LauncherSettings.rows(context)) }
     var cols by remember { mutableStateOf(LauncherSettings.cols(context)) }
     var switchIcon by remember { mutableStateOf(LauncherSettings.switchIcon(context)) }
+    var iconStyle by remember { mutableStateOf(LauncherSettings.iconStyle(context)) }
     var showSettings by remember { mutableStateOf(false) }
     var showWidgetPicker by remember { mutableStateOf(false) }
     var editWidgetId by remember { mutableStateOf<Int?>(null) }
@@ -319,6 +325,7 @@ fun LauncherRoot(
 
     val folderOpen = openFolderId != null
 
+    CompositionLocalProvider(LocalIconStyle provides iconStyle) {
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier
@@ -452,6 +459,11 @@ fun LauncherRoot(
             onRows = { rows = it; LauncherSettings.setRows(context, it) },
             onCols = { cols = it; LauncherSettings.setCols(context, it) },
             onSwitchIcon = { switchIcon = it; LauncherSettings.setSwitchIcon(context, it) },
+            iconStyle = iconStyle,
+            onIconStyle = {
+                iconStyle = it
+                LauncherSettings.setIconStyle(context, it)
+            },
             onDismiss = { showSettings = false }
         )
     }
@@ -492,6 +504,7 @@ fun LauncherRoot(
             onDismiss = { editWidgetId = null }
         )
     }
+}
 }
 
 fun launchApp(context: Context, app: AppEntry) {
@@ -722,6 +735,7 @@ fun HomeScreen(
             modifier = Modifier
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color.Black.copy(alpha = 0.28f))
+                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
                 .clickable { onOpenSearch() }
                 .padding(horizontal = 14.dp, vertical = 5.dp)
         ) {
@@ -736,6 +750,7 @@ fun HomeScreen(
                 .padding(horizontal = 12.dp)
                 .clip(RoundedCornerShape(28.dp))
                 .background(Color.White.copy(alpha = 0.16f))
+                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(28.dp))
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             favApps.take(4).forEach { app ->
@@ -1263,10 +1278,12 @@ fun SettingsDialog(
     rows: Int,
     cols: Int,
     switchIcon: Boolean,
+    iconStyle: IconStyle,
     onPages: (Int) -> Unit,
     onRows: (Int) -> Unit,
     onCols: (Int) -> Unit,
     onSwitchIcon: (Boolean) -> Unit,
+    onIconStyle: (IconStyle) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -1286,6 +1303,21 @@ fun SettingsDialog(
                 ) {
                     Text("ランチャー切替アイコン", modifier = Modifier.weight(1f))
                     Switch(checked = switchIcon, onCheckedChange = onSwitchIcon)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("アイコンの外観")
+                IconStyle.entries.forEach { style ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onIconStyle(style) }
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Text(if (style == iconStyle) "●" else "○")
+                        Spacer(Modifier.width(8.dp))
+                        Text(iconStyleLabel(style))
+                    }
                 }
             }
         }
@@ -1660,10 +1692,11 @@ fun AppIcon(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val key = appKey(app)
+    val style = LocalIconStyle.current
+    val key = IconCache.cacheKey(app, style)
     var bitmap by remember(key) { mutableStateOf(IconCache.peek(key)) }
     LaunchedEffect(key) {
-        if (bitmap == null) bitmap = IconCache.load(context, app)
+        if (bitmap == null) bitmap = IconCache.load(context, app, style)
     }
     val current = bitmap
     if (current != null) {

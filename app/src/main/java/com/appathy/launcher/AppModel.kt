@@ -165,12 +165,16 @@ object LauncherSettings {
     fun rows(context: Context): Int = prefs(context).getInt("rows", 5)
     fun cols(context: Context): Int = prefs(context).getInt("cols", 4)
     fun switchIcon(context: Context): Boolean = prefs(context).getBoolean("switch_icon", true)
+    fun iconStyle(context: Context): IconStyle =
+        IconStyle.from(prefs(context).getString("icon_style", null))
 
     fun setPages(context: Context, v: Int) = prefs(context).edit().putInt("pages", v).apply()
     fun setRows(context: Context, v: Int) = prefs(context).edit().putInt("rows", v).apply()
     fun setCols(context: Context, v: Int) = prefs(context).edit().putInt("cols", v).apply()
     fun setSwitchIcon(context: Context, v: Boolean) =
         prefs(context).edit().putBoolean("switch_icon", v).apply()
+    fun setIconStyle(context: Context, v: IconStyle) =
+        prefs(context).edit().putString("icon_style", v.name).apply()
 }
 
 data class WidgetItem(
