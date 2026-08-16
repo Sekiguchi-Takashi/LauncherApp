@@ -56,3 +56,25 @@ fun Drawable.toSquircleBitmap(sizePx: Int): ImageBitmap {
     source.recycle()
     return output.asImageBitmap()
 }
+
+object IconCache {
+    private val map = java.util.concurrent.ConcurrentHashMap<String, ImageBitmap>()
+
+    fun peek(key: String): ImageBitmap? = map[key]
+
+    suspend fun load(context: android.content.Context, app: AppEntry): ImageBitmap? {
+        val key = app.packageName + "/" + app.activityName
+        map[key]?.let { return it }
+        val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val component = android.content.ComponentName(app.packageName, app.activityName)
+                val info = context.packageManager.getActivityInfo(component, 0)
+                info.loadIcon(context.packageManager).toSquircleBitmap(160)
+            }.getOrNull()
+        }
+        if (bitmap != null) map[key] = bitmap
+        return bitmap
+    }
+
+    fun clear() = map.clear()
+}

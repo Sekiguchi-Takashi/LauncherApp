@@ -3,13 +3,11 @@ package com.appathy.launcher
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import androidx.compose.ui.graphics.ImageBitmap
 
 data class AppEntry(
     val label: String,
     val packageName: String,
     val activityName: String,
-    val icon: ImageBitmap,
     val category: Int
 )
 
@@ -31,7 +29,6 @@ fun loadApps(context: Context): List<AppEntry> {
                 label = it.loadLabel(pm).toString(),
                 packageName = it.activityInfo.packageName,
                 activityName = it.activityInfo.name,
-                icon = it.loadIcon(pm).toSquircleBitmap(160),
                 category = it.activityInfo.applicationInfo.category
             )
         }

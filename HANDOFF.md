@@ -170,3 +170,10 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - ローカルの HEAD を使えば、push した内容と必ず一致する
 - FolderOverlay の LazyVerticalGrid に `heightIn(max = 420.dp)` を追加
   - 補足: 親の Column はスクロール可能ではないため高さは無限にならず、クラッシュはしない。中身の多いフォルダでカードが画面外へ伸びるのを防ぐための上限
+
+## v2.0.3 実装済み（アイコン遅延読込）
+- AppEntry から icon フィールドを削除。loadApps() はラベル・パッケージ名・アクティビティ名・カテゴリのみを取得する軽い処理になり、起動時に全アイコンを生成しなくなった
+- IconCache（IconUtil.kt）: ConcurrentHashMap のメモリキャッシュ。load() は Dispatchers.IO で ComponentName から ActivityInfo を引き、squircle 化して格納。取得失敗時は null
+- AppIcon コンポーザブル: キャッシュにあれば即描画、無ければ LaunchedEffect で読み込む。読み込み中は角丸の半透明プレースホルダを表示（レイアウトが跳ねない）
+- 全描画箇所を AppIcon に統一（ワークスペース48dp / ドラッグ中56dp / Dock56dp / フォルダミニ18dp / フォルダ展開52dp / App Library44dp / 検索40dp）
+- アプリの追加・削除・更新のブロードキャスト受信時は IconCache.clear() してから再読込（古いアイコンが残らない）

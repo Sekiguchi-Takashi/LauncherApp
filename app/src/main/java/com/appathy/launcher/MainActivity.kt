@@ -94,6 +94,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -111,7 +112,7 @@ class MainActivity : ComponentActivity() {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            reload()
+            reloadAfterPackageChange()
         }
     }
 
@@ -120,6 +121,11 @@ class MainActivity : ComponentActivity() {
             val list = loadApps(this)
             runOnUiThread { apps.value = list }
         }
+    }
+
+    private fun reloadAfterPackageChange() {
+        IconCache.clear()
+        reload()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -735,17 +741,15 @@ fun HomeScreen(
             favApps.take(4).forEach { app ->
                 var dockMenu by remember(app.packageName) { mutableStateOf(false) }
                 Box {
-                    Image(
-                        bitmap = app.icon,
-                        contentDescription = app.label,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .pointerInput(app.packageName) {
-                                detectTapGestures(
-                                    onTap = { onLaunch(app) },
-                                    onLongPress = { dockMenu = true }
-                                )
-                            }
+                    AppIcon(
+                        app = app,
+                        size = 56.dp,
+                        modifier = Modifier.pointerInput(app.packageName) {
+                            detectTapGestures(
+                                onTap = { onLaunch(app) },
+                                onLongPress = { dockMenu = true }
+                            )
+                        }
                     )
                     DropdownMenu(expanded = dockMenu, onDismissRequest = { dockMenu = false }) {
                         DropdownMenuItem(
@@ -977,11 +981,7 @@ fun WorkspacePage(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     } else if (app != null) {
-                                        Image(
-                                            bitmap = app.icon,
-                                            contentDescription = app.label,
-                                            modifier = Modifier.size(48.dp)
-                                        )
+                                        AppIcon(app = app, size = 48.dp)
                                         Text(
                                             app.label,
                                             fontSize = 10.sp,
@@ -1180,11 +1180,7 @@ fun WorkspacePage(
                 if (dragFolder != null) {
                     FolderIcon(folder = dragFolder, resolve = resolveKey)
                 } else if (dragApp != null) {
-                    Image(
-                        bitmap = dragApp.icon,
-                        contentDescription = dragApp.label,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    AppIcon(app = dragApp, size = 56.dp)
                 }
             }
         }
@@ -1341,11 +1337,7 @@ fun FolderIcon(
                         Box(Modifier.weight(1f).fillMaxHeight()) {
                             val entry = shown.getOrNull(r * 2 + c)
                             if (entry != null) {
-                                Image(
-                                    bitmap = entry.icon,
-                                    contentDescription = entry.label,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                AppIcon(app = entry, size = 18.dp)
                             }
                         }
                     }
@@ -1443,11 +1435,7 @@ fun FolderOverlay(
                                 onLongClick = { menu = true }
                             )
                         ) {
-                            Image(
-                                bitmap = app.icon,
-                                contentDescription = app.label,
-                                modifier = Modifier.size(52.dp)
-                            )
+                            AppIcon(app = app, size = 52.dp)
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 app.label,
@@ -1538,11 +1526,7 @@ fun AppLibraryPage(
                                                 onLongClick = { menu = true }
                                             )
                                     ) {
-                                        Image(
-                                            bitmap = app.icon,
-                                            contentDescription = app.label,
-                                            modifier = Modifier.size(44.dp)
-                                        )
+                                        AppIcon(app = app, size = 44.dp)
                                         Text(
                                             app.label,
                                             fontSize = 9.sp,
@@ -1649,11 +1633,7 @@ fun SpotlightSearch(
                             )
                             .padding(vertical = 6.dp)
                     ) {
-                        Image(
-                            bitmap = app.icon,
-                            contentDescription = app.label,
-                            modifier = Modifier.size(40.dp)
-                        )
+                        AppIcon(app = app, size = 40.dp)
                         Spacer(Modifier.width(12.dp))
                         Text(app.label, fontSize = 15.sp, color = Color.White)
                     }
@@ -1670,5 +1650,34 @@ fun SpotlightSearch(
             }
         }
         TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+    }
+}
+
+@Composable
+fun AppIcon(
+    app: AppEntry,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val key = appKey(app)
+    var bitmap by remember(key) { mutableStateOf(IconCache.peek(key)) }
+    LaunchedEffect(key) {
+        if (bitmap == null) bitmap = IconCache.load(context, app)
+    }
+    val current = bitmap
+    if (current != null) {
+        Image(
+            bitmap = current,
+            contentDescription = app.label,
+            modifier = modifier.size(size)
+        )
+    } else {
+        Box(
+            modifier
+                .size(size)
+                .clip(RoundedCornerShape(size * 0.225f))
+                .background(Color.White.copy(alpha = 0.12f))
+        )
     }
 }
