@@ -242,3 +242,16 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 開き方は2つ: 画面右寄り（幅の60%より右）から下スワイプ、またはホーム長押しメニューの「コントロール」
   - 左寄りの下スワイプは従来どおり Spotlight 検索。detectVerticalDragGestures の onDragStart で開始 X 座標を見て振り分ける
 - AndroidManifest に WRITE_SETTINGS を追加
+
+## v2.6 実装済み（ホームアプリ切替）
+- 症状: アプリから Android のホームボタンを押すと Nova Launcher に戻る。原因は端末の既定ホームが Nova のままで、本アプリは「アプリ一覧から起動されたときだけ表示される」状態だったこと
+- SystemControl.kt に HomeApps を追加
+  - currentPackage / currentLabel: HOME インテントを MATCH_DEFAULT_ONLY で解決して現在の既定を取得（"android" が返る場合は「未設定（毎回選択）」）
+  - list: インストール済みホームアプリを列挙（AndroidManifest の <queries> に HOME インテントを追加済み）
+  - open: 指定したホームアプリを一度だけ起動する
+- LauncherSwitchScreen: 設定アプリ > 壁紙とシステム > 「ホームアプリ」から開く
+  - 現在の既定を名前で表示、既定でなければ「このランチャーを既定にする」（RoleManager のダイアログ）
+  - 「システムのホーム設定を開く」
+  - インストール済みホームアプリ一覧。各行の「開く」でそのランチャーを一度だけ起動できる
+  - 注意書き: Android では他アプリを既定に設定する操作をアプリ側から行えないため、既定変更は上記2ボタン経由になる
+- ホーム画面上部に、既定でないときだけ案内バナーを表示（タップで RoleManager のダイアログ）

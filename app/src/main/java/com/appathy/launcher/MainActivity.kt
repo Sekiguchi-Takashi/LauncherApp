@@ -181,6 +181,9 @@ fun LauncherRoot(
 ) {
     val context = LocalContext.current
     val rootView = LocalView.current
+    val homeRoleLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { }
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     var searchOpen by remember { mutableStateOf(false) }
     var editMode by remember { mutableStateOf(false) }
@@ -189,6 +192,7 @@ fun LauncherRoot(
     var hiddenApps by remember { mutableStateOf(HiddenApps.load(context)) }
     var appListOpen by remember { mutableStateOf(false) }
     var controlOpen by remember { mutableStateOf(false) }
+    var launcherSwitchOpen by remember { mutableStateOf(false) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -497,6 +501,7 @@ fun LauncherRoot(
     BackHandler(enabled = settingsAppOpen) { settingsAppOpen = false }
     BackHandler(enabled = appListOpen) { appListOpen = false }
     BackHandler(enabled = controlOpen) { controlOpen = false }
+    BackHandler(enabled = launcherSwitchOpen) { launcherSwitchOpen = false }
 
     if (settingsAppOpen) {
         SettingsApp(
@@ -529,6 +534,11 @@ fun LauncherRoot(
             onAddWidget = { showWidgetPicker = true },
             onRequestDefaultHome = { openLauncherChooser(context) },
             onOpenHomeSettings = { openLauncherChooser(context) },
+            onOpenLauncherSwitch = {
+                settingsAppOpen = false
+                launcherSwitchOpen = true
+            },
+            currentHomeLabel = HomeApps.currentLabel(context),
             onChangeWallpaper = {
                 runCatching {
                     context.startActivity(
@@ -538,6 +548,15 @@ fun LauncherRoot(
                 }
             },
             onDismiss = { settingsAppOpen = false }
+        )
+    }
+
+    if (launcherSwitchOpen) {
+        LauncherSwitchScreen(
+            isDefaultNow = isDefaultHome(context),
+            onRequestDefault = { requestDefaultHome(context, homeRoleLauncher) },
+            onOpenHomeSettings = { openLauncherChooser(context) },
+            onDismiss = { launcherSwitchOpen = false }
         )
     }
 
@@ -781,6 +800,26 @@ fun HomeScreen(
             .padding(top = 48.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+
+        if (!isDefault) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
+                    .clickable { requestDefaultHome(context, roleLauncher) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    "ホームボタンが他のランチャーに戻ります → 既定にする",
+                    fontSize = 11.sp,
+                    color = Color.White
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+        }
 
         Box(
             Modifier
@@ -1988,6 +2027,8 @@ fun SettingsApp(
     onAddWidget: () -> Unit,
     onRequestDefaultHome: () -> Unit,
     onOpenHomeSettings: () -> Unit,
+    onOpenLauncherSwitch: () -> Unit,
+    currentHomeLabel: String,
     onChangeWallpaper: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2057,9 +2098,9 @@ fun SettingsApp(
                 SettingsSection("壁紙とシステム") {
                     SettingsRow(label = "壁紙を変更", onClick = onChangeWallpaper)
                     SettingsRow(
-                        label = "デフォルトのホーム",
-                        value = if (isDefaultHomeNow) "このアプリ" else "他のアプリ",
-                        onClick = if (isDefaultHomeNow) null else onRequestDefaultHome
+                        label = "ホームアプリ",
+                        value = if (isDefaultHomeNow) "このアプリ" else currentHomeLabel,
+                        onClick = onOpenLauncherSwitch
                     )
                     SettingsRow(label = "ホーム設定を開く", onClick = onOpenHomeSettings)
                 }
@@ -2359,6 +2400,136 @@ fun ControlCenter(onDismiss: () -> Unit) {
                     onClick = { SystemControl.next(context) },
                     modifier = Modifier.weight(1f)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun LauncherSwitchScreen(
+    isDefaultNow: Boolean,
+    onRequestDefault: () -> Unit,
+    onOpenHomeSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var reloadKey by remember { mutableStateOf(0) }
+    val currentLabel = remember(reloadKey) { HomeApps.currentLabel(context) }
+    val homeApps = remember(reloadKey) { HomeApps.list(context) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xF20B0D10))
+            .padding(horizontal = 16.dp)
+    ) {
+        Spacer(Modifier.height(44.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "ホームアプリ",
+                fontSize = 26.sp,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White.copy(alpha = 0.10f))
+                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+                .padding(14.dp)
+        ) {
+            Text("現在の既定", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+            Text(currentLabel, fontSize = 17.sp, color = Color.White)
+            if (!isDefaultNow) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "ホームボタンを押すと上のアプリが開きます。このランチャーを使うには既定を変更してください。",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.6f)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        if (!isDefaultNow) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF2C4A6E))
+                    .clickable {
+                        onRequestDefault()
+                        reloadKey += 1
+                    }
+                    .padding(14.dp)
+            ) {
+                Text("このランチャーを既定にする", fontSize = 15.sp, color = Color.White)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White.copy(alpha = 0.10f))
+                .clickable {
+                    onOpenHomeSettings()
+                    reloadKey += 1
+                }
+                .padding(14.dp)
+        ) {
+            Text("システムのホーム設定を開く", fontSize = 15.sp, color = Color.White)
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "インストール済みのホームアプリ",
+            fontSize = 12.sp,
+            color = Color.White.copy(alpha = 0.6f)
+        )
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(homeApps.size) { i ->
+                val app = homeApps[i]
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(12.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(app.label, fontSize = 14.sp, color = Color.White)
+                        Text(
+                            if (app.isCurrent) "既定" else app.packageName,
+                            fontSize = 10.sp,
+                            color = if (app.isCurrent) Color(0xFF5BD6A8)
+                            else Color.White.copy(alpha = 0.45f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    TextButton(onClick = { HomeApps.open(context, app) }) {
+                        Text("開く", fontSize = 13.sp, color = Color.White)
+                    }
+                }
+            }
+            item {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "「開く」はそのホームアプリを一度だけ起動します。既定そのものを変えるには上の2つのボタンを使ってください。Android では他アプリを既定に設定する操作をアプリ側から行えないためです。",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.5f)
+                )
+                Spacer(Modifier.height(24.dp))
             }
         }
     }

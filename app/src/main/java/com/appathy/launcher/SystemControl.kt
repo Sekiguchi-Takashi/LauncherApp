@@ -106,3 +106,59 @@ object SystemControl {
         runCatching { context.startActivity(intent) }
     }
 }
+
+data class HomeAppInfo(
+    val label: String,
+    val packageName: String,
+    val activityName: String,
+    val isCurrent: Boolean
+)
+
+object HomeApps {
+
+    private fun homeIntent(): Intent =
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+
+    fun currentPackage(context: Context): String? =
+        runCatching {
+            context.packageManager
+                .resolveActivity(homeIntent(), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        }.getOrNull()
+
+    fun currentLabel(context: Context): String {
+        val pkg = currentPackage(context) ?: return "未設定"
+        if (pkg == "android") return "未設定（毎回選択）"
+        return runCatching {
+            val pm = context.packageManager
+            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+        }.getOrDefault(pkg)
+    }
+
+    fun list(context: Context): List<HomeAppInfo> {
+        val pm = context.packageManager
+        val current = currentPackage(context)
+        return runCatching {
+            pm.queryIntentActivities(homeIntent(), 0)
+                .filter { it.activityInfo.packageName != "android" }
+                .map {
+                    HomeAppInfo(
+                        label = it.loadLabel(pm).toString(),
+                        packageName = it.activityInfo.packageName,
+                        activityName = it.activityInfo.name,
+                        isCurrent = it.activityInfo.packageName == current
+                    )
+                }
+                .distinctBy { it.packageName }
+                .sortedBy { it.label.lowercase() }
+        }.getOrDefault(emptyList())
+    }
+
+    fun open(context: Context, app: HomeAppInfo) {
+        val intent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_HOME)
+            .setClassName(app.packageName, app.activityName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+    }
+}
