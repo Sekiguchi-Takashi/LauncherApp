@@ -986,7 +986,11 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            HorizontalPager(
+                state = pagerState,
+                userScrollEnabled = !editMode,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
                 if (page >= pages) {
                     AppLibraryPage(
                         apps = apps,
@@ -1061,13 +1065,20 @@ fun HomeScreen(
             repeat(totalPages) { i ->
                 Box(
                     Modifier
-                        .size(if (pagerState.currentPage == i) 8.dp else 6.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (pagerState.currentPage == i) Color.White
-                            else Color.White.copy(alpha = 0.4f)
-                        )
-                )
+                        .size(20.dp)
+                        .clickable { pagerScope.launch { pagerState.animateScrollToPage(i) } },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        Modifier
+                            .size(if (pagerState.currentPage == i) 8.dp else 6.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (pagerState.currentPage == i) Color.White
+                                else Color.White.copy(alpha = 0.4f)
+                            )
+                    )
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -1246,7 +1257,9 @@ fun WorkspacePage(
                                         }
                                         .then(
                                             if (editMode) {
-                                                Modifier.pointerInput(item) {
+                                                Modifier
+                                                    .clickable { menuFor = item }
+                                                    .pointerInput(item) {
                                                     detectDragGestures(
                                                         onDragStart = { offset ->
                                                             dragItem = item
@@ -1624,7 +1637,15 @@ fun WorkspacePage(
                 if (dragFolder != null) {
                     FolderIcon(folder = dragFolder, resolve = resolveKey)
                 } else if (dragApp != null) {
-                    AppIcon(app = dragApp, size = 68.dp)
+                    AppIcon(
+                        app = dragApp,
+                        size = 68.dp,
+                        modifier = Modifier.shadow(
+                            elevation = 14.dp,
+                            shape = RoundedCornerShape(68.dp * IconCorner),
+                            clip = false
+                        )
+                    )
                 }
             }
         }
