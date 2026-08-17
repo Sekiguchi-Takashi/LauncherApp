@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -173,6 +174,19 @@ class MainActivity : ComponentActivity() {
 }
 
 val LocalIconStyle = staticCompositionLocalOf { IconStyle.DEFAULT }
+val LocalLabelOverrides = staticCompositionLocalOf { emptyMap<String, String>() }
+val LocalIconOverrides = staticCompositionLocalOf { emptyMap<String, String>() }
+val LocalBadgeEnabled = staticCompositionLocalOf { false }
+
+@Composable
+fun displayLabel(app: AppEntry): String =
+    LocalLabelOverrides.current[appKey(app)] ?: app.label
+
+@Composable
+fun badgeCount(packageName: String): Int {
+    if (!LocalBadgeEnabled.current) return 0
+    return LauncherNotificationService.items.count { it.packageName == packageName }
+}
 
 @Composable
 fun LauncherRoot(
@@ -234,6 +248,29 @@ fun LauncherRoot(
     var notificationsOpen by remember { mutableStateOf(false) }
     var quickPanelOpen by remember { mutableStateOf(false) }
     var homePrompt by remember { mutableStateOf(LauncherSettings.homePrompt(context)) }
+    var notifBadge by remember { mutableStateOf(LauncherSettings.notifBadge(context)) }
+    var labelOverrides by remember { mutableStateOf(AppOverrides.labels(context)) }
+    var iconOverrides by remember { mutableStateOf(AppOverrides.icons(context)) }
+    var renameTarget by remember { mutableStateOf<AppEntry?>(null) }
+    var iconTarget by remember { mutableStateOf<AppEntry?>(null) }
+
+    val pickIconLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val target = iconTarget
+        iconTarget = null
+        if (uri != null && target != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            AppOverrides.setIcon(context, appKey(target), uri.toString())
+            IconCache.invalidate(target)
+            iconOverrides = AppOverrides.icons(context)
+        }
+    }
     var askHome by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -411,7 +448,12 @@ fun LauncherRoot(
 
     val folderOpen = openFolderId != null
 
-    CompositionLocalProvider(LocalIconStyle provides iconStyle) {
+    CompositionLocalProvider(
+        LocalIconStyle provides iconStyle,
+        LocalLabelOverrides provides labelOverrides,
+        LocalIconOverrides provides iconOverrides,
+        LocalBadgeEnabled provides notifBadge
+    ) {
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier
@@ -467,6 +509,11 @@ fun LauncherRoot(
             onToggleFavorite = { pkg -> toggleFavorite(pkg) },
             onOpenSettings = { settingsAppOpen = true },
             onOpenSettingsApp = { settingsAppOpen = true },
+            onRenameApp = { renameTarget = it },
+            onChangeIcon = { app ->
+                iconTarget = app
+                pickIconLauncher.launch(arrayOf("image/*"))
+            },
             onEditWidget = { editWidgetId = it.widgetId },
             onDeleteWidget = { w ->
                 runCatching { host.deleteAppWidgetId(w.widgetId) }
@@ -598,6 +645,11 @@ fun LauncherRoot(
             currentHomeLabel = HomeApps.currentLabel(context),
             notificationAccess = LauncherNotificationService.isEnabled(context),
             onOpenNotificationAccess = { LauncherNotificationService.openSettings(context) },
+            badgeOn = notifBadge,
+            onToggleBadge = {
+                notifBadge = !notifBadge
+                LauncherSettings.setNotifBadge(context, notifBadge)
+            },
             homePromptOn = homePrompt,
             onToggleHomePrompt = {
                 homePrompt = !homePrompt
@@ -623,6 +675,45 @@ fun LauncherRoot(
             onRequestDefault = { requestDefaultHome(context, homeRoleLauncher) },
             onOpenHomeSettings = { openLauncherChooser(context) },
             onDismiss = { launcherSwitchOpen = false }
+        )
+    }
+
+    val renaming = renameTarget
+    if (renaming != null) {
+        var draft by remember(renaming) {
+            mutableStateOf(labelOverrides[appKey(renaming)] ?: renaming.label)
+        }
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("名前を変更") },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    AppOverrides.setLabel(context, appKey(renaming), draft)
+                    labelOverrides = AppOverrides.labels(context)
+                    renameTarget = null
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        AppOverrides.setLabel(context, appKey(renaming), null)
+                        AppOverrides.setIcon(context, appKey(renaming), null)
+                        IconCache.invalidate(renaming)
+                        labelOverrides = AppOverrides.labels(context)
+                        iconOverrides = AppOverrides.icons(context)
+                        renameTarget = null
+                    }) { Text("既定に戻す") }
+                    TextButton(onClick = { renameTarget = null }) { Text("キャンセル") }
+                }
+            }
         )
     }
 
@@ -869,6 +960,8 @@ fun HomeScreen(
     onToggleFavorite: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSettingsApp: () -> Unit,
+    onRenameApp: (AppEntry) -> Unit,
+    onChangeIcon: (AppEntry) -> Unit,
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
@@ -934,6 +1027,8 @@ fun HomeScreen(
                     editMode = editMode,
                     onEnterEdit = onEnterEdit,
                     onOpenSettingsApp = onOpenSettingsApp,
+                    onRenameApp = onRenameApp,
+                    onChangeIcon = onChangeIcon,
                     onScrollToPage = { target ->
                         pagerScope.launch { pagerState.animateScrollToPage(target) }
                     },
@@ -991,7 +1086,7 @@ fun HomeScreen(
             favApps.take(4).forEach { app ->
                 var dockMenu by remember(app.packageName) { mutableStateOf(false) }
                 Box {
-                    AppIcon(
+                    AppIconWithBadge(
                         app = app,
                         size = 60.dp,
                         modifier = Modifier.pointerInput(app.packageName) {
@@ -1075,6 +1170,8 @@ fun WorkspacePage(
     editMode: Boolean,
     onEnterEdit: () -> Unit,
     onOpenSettingsApp: () -> Unit,
+    onRenameApp: (AppEntry) -> Unit,
+    onChangeIcon: (AppEntry) -> Unit,
     onScrollToPage: (Int) -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
@@ -1234,9 +1331,9 @@ fun WorkspacePage(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     } else if (app != null) {
-                                        AppIcon(app = app, size = 60.dp)
+                                        AppIconWithBadge(app = app, size = 60.dp)
                                         Text(
-                                            app.label,
+                                            displayLabel(app),
                                             fontSize = LauncherType.iconLabel,
                                             color = Color.White,
                                             maxLines = 1,
@@ -1337,6 +1434,20 @@ fun WorkspacePage(
                                                 }
                                             )
                                         }
+                                        DropdownMenuItem(
+                                            text = { Text("名前を変更") },
+                                            onClick = {
+                                                menuFor = null
+                                                onRenameApp(app)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("アイコンを変更") },
+                                            onClick = {
+                                                menuFor = null
+                                                onChangeIcon(app)
+                                            }
+                                        )
                                         DropdownMenuItem(
                                             text = { Text("App Libraryへ移動") },
                                             onClick = {
@@ -1982,10 +2093,11 @@ fun AppIcon(
 ) {
     val context = LocalContext.current
     val style = LocalIconStyle.current
-    val key = IconCache.cacheKey(app, style)
+    val override = LocalIconOverrides.current[appKey(app)]
+    val key = IconCache.cacheKey(app, style) + (if (override != null) "@custom" else "")
     var bitmap by remember(key) { mutableStateOf(IconCache.peek(key)) }
     LaunchedEffect(key) {
-        if (bitmap == null) bitmap = IconCache.load(context, app, style)
+        if (bitmap == null) bitmap = IconCache.load(context, app, style, override)
     }
     val current = bitmap
     if (current != null) {
@@ -2007,6 +2119,36 @@ fun AppIcon(
                 .clip(RoundedCornerShape(size * IconCorner))
                 .background(LauncherColors.glassRaised)
         )
+    }
+}
+
+@Composable
+fun AppIconWithBadge(
+    app: AppEntry,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    val count = badgeCount(app.packageName)
+    Box(modifier) {
+        AppIcon(app = app, size = size)
+        if (count > 0) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 5.dp, y = (-5).dp)
+                    .defaultMinSize(minWidth = 19.dp, minHeight = 19.dp)
+                    .clip(CircleShape)
+                    .background(LauncherColors.danger)
+                    .padding(horizontal = 5.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (count > 99) "99+" else count.toString(),
+                    fontSize = LauncherType.micro,
+                    color = LauncherColors.text
+                )
+            }
+        }
     }
 }
 
@@ -2136,6 +2278,8 @@ fun SettingsApp(
     onOpenNotificationAccess: () -> Unit,
     homePromptOn: Boolean,
     onToggleHomePrompt: () -> Unit,
+    badgeOn: Boolean,
+    onToggleBadge: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onChangeWallpaper: () -> Unit,
@@ -2224,6 +2368,11 @@ fun SettingsApp(
                         onClick = onOpenLauncherSwitch
                     )
                     SettingsRow(label = "ホーム設定を開く", onClick = onOpenHomeSettings)
+                    SettingsRow(
+                        label = "通知バッジ",
+                        value = if (badgeOn) "表示" else "非表示",
+                        onClick = onToggleBadge
+                    )
                     SettingsRow(
                         label = "起動時に既定のホームを確認",
                         value = if (homePromptOn) "する" else "しない",

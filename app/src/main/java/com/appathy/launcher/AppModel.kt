@@ -82,6 +82,48 @@ fun ensureSettingsTile(
     return items
 }
 
+object AppOverrides {
+    private const val PREF = "launcher_prefs"
+    private const val LABEL_KEY = "label_overrides"
+    private const val ICON_KEY = "icon_overrides"
+
+    private fun decode(raw: String): Map<String, String> =
+        raw.split(";").filter { it.isNotBlank() }.mapNotNull {
+            val i = it.indexOf("=")
+            if (i <= 0) null else it.substring(0, i) to it.substring(i + 1)
+        }.toMap()
+
+    private fun encode(map: Map<String, String>): String =
+        map.entries.joinToString(";") { it.key + "=" + it.value }
+
+    fun labels(context: Context): Map<String, String> =
+        decode(
+            context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                .getString(LABEL_KEY, "")!!
+        )
+
+    fun icons(context: Context): Map<String, String> =
+        decode(
+            context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                .getString(ICON_KEY, "")!!
+        )
+
+    fun setLabel(context: Context, key: String, label: String?) {
+        val map = labels(context).toMutableMap()
+        val cleaned = label?.replace(";", " ")?.replace("=", " ")?.trim()
+        if (cleaned.isNullOrBlank()) map.remove(key) else map[key] = cleaned
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putString(LABEL_KEY, encode(map)).apply()
+    }
+
+    fun setIcon(context: Context, key: String, uri: String?) {
+        val map = icons(context).toMutableMap()
+        if (uri.isNullOrBlank()) map.remove(key) else map[key] = uri
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putString(ICON_KEY, encode(map)).apply()
+    }
+}
+
 object HiddenApps {
     private const val PREF = "launcher_prefs"
     private const val KEY = "hidden_apps"
@@ -101,10 +143,13 @@ object BackupData {
 
     private val stringKeys = listOf(
         "favorites", "home_items", "widget_items", "folders",
-        "library_only", "hidden_apps", "icon_style"
+        "library_only", "hidden_apps", "icon_style",
+        "label_overrides", "icon_overrides"
     )
     private val intKeys = listOf("pages", "rows", "cols")
-    private val boolKeys = listOf("settings_tile_hidden", "switch_icon", "home_prompt")
+    private val boolKeys = listOf(
+        "settings_tile_hidden", "switch_icon", "home_prompt", "notif_badge"
+    )
 
     fun serialize(context: Context): String {
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -262,6 +307,9 @@ object LauncherSettings {
     fun cols(context: Context): Int = prefs(context).getInt("cols", 4)
     fun switchIcon(context: Context): Boolean = prefs(context).getBoolean("switch_icon", true)
     fun homePrompt(context: Context): Boolean = prefs(context).getBoolean("home_prompt", true)
+    fun notifBadge(context: Context): Boolean = prefs(context).getBoolean("notif_badge", true)
+    fun setNotifBadge(context: Context, v: Boolean) =
+        prefs(context).edit().putBoolean("notif_badge", v).apply()
     fun setHomePrompt(context: Context, v: Boolean) =
         prefs(context).edit().putBoolean("home_prompt", v).apply()
     fun iconStyle(context: Context): IconStyle =

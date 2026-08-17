@@ -168,18 +168,39 @@ object IconCache {
 
     fun peek(key: String): ImageBitmap? = map[key]
 
-    suspend fun load(context: Context, app: AppEntry, style: IconStyle): ImageBitmap? {
-        val key = cacheKey(app, style)
+    suspend fun load(
+        context: Context,
+        app: AppEntry,
+        style: IconStyle,
+        overrideUri: String? = null
+    ): ImageBitmap? {
+        val key = cacheKey(app, style) + (if (overrideUri != null) "@custom" else "")
         map[key]?.let { return it }
         val bitmap = withContext(Dispatchers.IO) {
             runCatching {
-                val component = ComponentName(app.packageName, app.activityName)
-                val info = context.packageManager.getActivityInfo(component, 0)
-                info.loadIcon(context.packageManager).toStyledBitmap(160, style)
+                val drawable = if (overrideUri != null) {
+                    context.contentResolver.openInputStream(android.net.Uri.parse(overrideUri))
+                        ?.use { input ->
+                            android.graphics.drawable.BitmapDrawable(
+                                context.resources,
+                                android.graphics.BitmapFactory.decodeStream(input)
+                            )
+                        }
+                } else {
+                    val component = ComponentName(app.packageName, app.activityName)
+                    context.packageManager.getActivityInfo(component, 0)
+                        .loadIcon(context.packageManager)
+                }
+                drawable?.toStyledBitmap(160, style)
             }.getOrNull()
         }
         if (bitmap != null) map[key] = bitmap
         return bitmap
+    }
+
+    fun invalidate(app: AppEntry) {
+        val prefix = app.packageName + "/" + app.activityName + "#"
+        map.keys.filter { it.startsWith(prefix) }.forEach { map.remove(it) }
     }
 
     fun cacheKey(app: AppEntry, style: IconStyle): String =

@@ -340,3 +340,19 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 画面上部に常時出ていた「デフォルトのホームに設定」バナーを削除（HomeScreen 内の isDefault / roleLauncher も不要になったため撤去）
   - LauncherRoot の LaunchedEffect で、起動時に既定でなければ AlertDialog を1回だけ表示。選択肢は「既定にする」「あとで」「今後聞かない」
   - 「今後聞かない」は LauncherSettings.homePrompt("home_prompt") に保存。設定 > 壁紙とシステム の「起動時に既定のホームを確認」で戻せる。バックアップ対象にも追加
+
+## v3.3 実装済み（通知バッジ・アプリ名/アイコンの個別変更）
+- deploy.sh を最新の恒久仕様へ更新: 次タグを最新リリースではなく `git fetch --tags --force` → `git tag --list 'v*' | sort -V | tail -1` から算出し、`git tag` → `git push origin タグ名` で発行する
+- 通知バッジ
+  - LauncherNotificationService.items をパッケージ名で数え、アイコン右上に赤い丸で件数を出す（100件以上は 99+）
+  - AppIconWithBadge を新設し、ホームと Dock のアイコンをこれに差し替え。App Library や検索の一覧は素の AppIcon のまま
+  - LocalBadgeEnabled（CompositionLocal）で ON/OFF を配る。設定 > 壁紙とシステム の「通知バッジ」で切り替え、"notif_badge" に保存
+  - 通知アクセスが未許可なら items が空なのでバッジは出ない
+- アプリ名の変更とアイコンの個別差し替え
+  - AppOverrides（"label_overrides" / "icon_overrides"）に "キー=値" を ";" 連結で保存。名前に含まれる ; と = は空白へ置換
+  - アイコン長押しメニューに「名前を変更」「アイコンを変更」を追加
+  - 名前変更はダイアログ。「既定に戻す」で名前とアイコンの両方の上書きを消す
+  - アイコン変更は SAF の OpenDocument("image/*")。takePersistableUriPermission で再起動後も読めるようにし、IconCache.invalidate で作り直す
+  - IconCache.load に overrideUri を追加。上書きがある場合はキー末尾に @custom を付けて別枠でキャッシュする
+  - 表示名は displayLabel(app) 経由。ホーム・Dock・検索結果に反映される
+- バックアップ対象キーに label_overrides / icon_overrides / notif_badge を追加
