@@ -266,3 +266,13 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - コントロールセンターの上部に NowPlayingCard を追加（再生中のときだけ表示、曲名・アーティスト・前後送りと再生停止）
 - 下スワイプのジェスチャーを3分割に変更: 左33%未満=通知、中央=Spotlight検索、右66%超=コントロール。長押しメニューにも「通知」を追加
 - 設定 > 壁紙とシステム に「通知へのアクセス」（許可済み / 未許可）を追加
+
+## v2.8 実装済み（ページ間ドラッグ移動・バックアップ/復元）
+- ドラッグでのページ間移動: アイコンをページの左右端（幅の 8% 以内）で離すと、隣のページへ移動しつつ Pager もそのページへスクロールする
+  - 通常モード・編集モードの両方の onDragEnd に判定を追加。編集モードは長押し不要なので操作が速い
+  - WorkspacePage に onScrollToPage を追加し、HomeScreen 側で rememberCoroutineScope + pagerState.animateScrollToPage を呼ぶ
+- バックアップ/復元: AppModel に BackupData を追加
+  - serialize(): SharedPreferences の対象キー（favorites / home_items / widget_items / folders / library_only / hidden_apps / icon_style / pages / rows / cols / settings_tile_hidden / switch_icon）を "型\tキー\t値" のタブ区切りテキストにする。1行目は識別子 launcherapp-backup-v1
+  - restore(): 識別子が一致しないファイルは拒否して false を返す
+  - 設定アプリに「バックアップ」セクションを追加。書き出しは CreateDocument、復元は OpenDocument（SAF なのでストレージ権限は不要）
+  - 復元後は IconCache.clear() のうえ Activity.recreate() で状態を読み直す

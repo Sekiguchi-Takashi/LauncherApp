@@ -81,6 +81,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -112,6 +113,7 @@ import androidx.core.content.ContextCompat
 import kotlin.concurrent.thread
 import kotlin.math.ceil
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -184,6 +186,43 @@ fun LauncherRoot(
     val homeRoleLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            val ok = runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(BackupData.serialize(context).toByteArray())
+                }
+            }.isSuccess
+            Toast.makeText(
+                context,
+                if (ok) "書き出しました" else "書き出しに失敗しました",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    input.readBytes().toString(Charsets.UTF_8)
+                }
+            }.getOrNull()
+            val ok = text != null && BackupData.restore(context, text)
+            Toast.makeText(
+                context,
+                if (ok) "復元しました。再起動します" else "このファイルは読み込めません",
+                Toast.LENGTH_SHORT
+            ).show()
+            if (ok) {
+                IconCache.clear()
+                (context as? android.app.Activity)?.recreate()
+            }
+        }
+    }
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     var searchOpen by remember { mutableStateOf(false) }
     var editMode by remember { mutableStateOf(false) }
@@ -544,6 +583,8 @@ fun LauncherRoot(
             currentHomeLabel = HomeApps.currentLabel(context),
             notificationAccess = LauncherNotificationService.isEnabled(context),
             onOpenNotificationAccess = { LauncherNotificationService.openSettings(context) },
+            onExport = { exportLauncher.launch("launcher-backup.txt") },
+            onImport = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
             onChangeWallpaper = {
                 runCatching {
                     context.startActivity(
@@ -789,6 +830,7 @@ fun HomeScreen(
     }
     var homeMenu by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { totalPages })
+    val pagerScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -881,6 +923,9 @@ fun HomeScreen(
                     editMode = editMode,
                     onEnterEdit = onEnterEdit,
                     onOpenSettingsApp = onOpenSettingsApp,
+                    onScrollToPage = { target ->
+                        pagerScope.launch { pagerState.animateScrollToPage(target) }
+                    },
                     resolveKey = { key ->
                         val i = key.lastIndexOf('/')
                         if (i <= 0) null else apps.find {
@@ -1051,6 +1096,7 @@ fun WorkspacePage(
     editMode: Boolean,
     onEnterEdit: () -> Unit,
     onOpenSettingsApp: () -> Unit,
+    onScrollToPage: (Int) -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
     BoxWithConstraints(
@@ -1148,11 +1194,24 @@ fun WorkspacePage(
                                                     onDragEnd = {
                                                         val moving = dragItem
                                                         if (moving != null) {
-                                                            val tc = (dragPos.x / cellW).toInt()
-                                                                .coerceIn(0, cols - 1)
-                                                            val tr = (dragPos.y / cellH).toInt()
-                                                                .coerceIn(0, rows - 1)
-                                                            onMoveItem(moving, tr, tc)
+                                                            val w = cellW * cols
+                                                            val edge = w * 0.08f
+                                                            if (dragPos.x < edge && pageIndex > 0) {
+                                                                onMoveToPage(moving, -1)
+                                                                onScrollToPage(pageIndex - 1)
+                                                            } else if (
+                                                                dragPos.x > w - edge &&
+                                                                pageIndex < pages - 1
+                                                            ) {
+                                                                onMoveToPage(moving, 1)
+                                                                onScrollToPage(pageIndex + 1)
+                                                            } else {
+                                                                val tc = (dragPos.x / cellW).toInt()
+                                                                    .coerceIn(0, cols - 1)
+                                                                val tr = (dragPos.y / cellH).toInt()
+                                                                    .coerceIn(0, rows - 1)
+                                                                onMoveItem(moving, tr, tc)
+                                                            }
                                                         }
                                                         dragItem = null
                                                     },
@@ -1178,8 +1237,19 @@ fun WorkspacePage(
                                                     val moving = dragItem
                                                     if (moving != null) {
                                                         val dist = (dragPos - dragStart).getDistance()
+                                                        val w = cellW * cols
+                                                        val edge = w * 0.08f
                                                         if (dist < cellW * 0.2f) {
                                                             menuFor = moving
+                                                        } else if (dragPos.x < edge && pageIndex > 0) {
+                                                            onMoveToPage(moving, -1)
+                                                            onScrollToPage(pageIndex - 1)
+                                                        } else if (
+                                                            dragPos.x > w - edge &&
+                                                            pageIndex < pages - 1
+                                                        ) {
+                                                            onMoveToPage(moving, 1)
+                                                            onScrollToPage(pageIndex + 1)
                                                         } else {
                                                             val tc = (dragPos.x / cellW).toInt()
                                                                 .coerceIn(0, cols - 1)
@@ -2048,6 +2118,8 @@ fun SettingsApp(
     currentHomeLabel: String,
     notificationAccess: Boolean,
     onOpenNotificationAccess: () -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
     onChangeWallpaper: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2142,6 +2214,12 @@ fun SettingsApp(
                             )
                         }
                     }
+                }
+            }
+            item {
+                SettingsSection("バックアップ") {
+                    SettingsRow(label = "設定をファイルに書き出す", onClick = onExport)
+                    SettingsRow(label = "ファイルから復元", onClick = onImport)
                 }
             }
             item {

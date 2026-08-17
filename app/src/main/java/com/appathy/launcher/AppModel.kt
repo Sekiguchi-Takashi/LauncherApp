@@ -96,6 +96,54 @@ object HiddenApps {
     }
 }
 
+object BackupData {
+    private const val PREF = "launcher_prefs"
+
+    private val stringKeys = listOf(
+        "favorites", "home_items", "widget_items", "folders",
+        "library_only", "hidden_apps", "icon_style"
+    )
+    private val intKeys = listOf("pages", "rows", "cols")
+    private val boolKeys = listOf("settings_tile_hidden", "switch_icon")
+
+    fun serialize(context: Context): String {
+        val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        val lines = mutableListOf("launcherapp-backup-v1")
+        stringKeys.forEach { key ->
+            val value = prefs.getString(key, null)
+            if (value != null) lines.add("S\t" + key + "\t" + value)
+        }
+        intKeys.forEach { key ->
+            if (prefs.contains(key)) lines.add("I\t" + key + "\t" + prefs.getInt(key, 0))
+        }
+        boolKeys.forEach { key ->
+            if (prefs.contains(key)) lines.add("B\t" + key + "\t" + prefs.getBoolean(key, false))
+        }
+        return lines.joinToString("\n")
+    }
+
+    fun restore(context: Context, text: String): Boolean {
+        val lines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.firstOrNull() != "launcherapp-backup-v1") return false
+        val editor = context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
+        lines.drop(1).forEach { line ->
+            val parts = line.split("\t")
+            if (parts.size >= 3) {
+                val type = parts[0]
+                val key = parts[1]
+                val value = parts.drop(2).joinToString("\t")
+                when (type) {
+                    "S" -> editor.putString(key, value)
+                    "I" -> value.toIntOrNull()?.let { editor.putInt(key, it) }
+                    "B" -> editor.putBoolean(key, value.toBoolean())
+                }
+            }
+        }
+        editor.apply()
+        return true
+    }
+}
+
 object SettingsTile {
     private const val PREF = "launcher_prefs"
     private const val KEY = "settings_tile_hidden"
