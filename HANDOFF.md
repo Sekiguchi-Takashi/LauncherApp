@@ -307,3 +307,14 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 一覧から「← メニューに戻る」で戻れる
 - 編集モード中はページドットの上に「完了」ボタンを表示（空き領域タップでの終了が無くなったため）
 - ハンドル以外の場所にはジェスチャーが無いので、アイコンの長押し・ドラッグが最優先で処理される
+
+## v3.0.1（長押しの実装方式を変更）
+- v2.9.1 と v3.0 の修正では直らなかったため、ジェスチャーの実装方式そのものを差し替えた
+- 旧: セルに `clickable` と `pointerInput { detectDragGesturesAfterLongPress }` を重ねる独自実装
+- 新: モードごとに Modifier を出し分ける
+  - 通常モード: `combinedClickable(onClick = 起動/フォルダ/設定, onLongClick = onEnterEdit)`
+    - 長押しした時点で編集モードに入り、アイコンが揺れ始める
+  - 編集モード: `pointerInput { detectDragGestures }` で長押し不要の即ドラッグ。動かさず離すと長押しメニュー（判定はセル幅の 15% 未満）
+- 根拠: このアプリで長押しが確実に動いている箇所（App Library / Spotlight 検索 / フォルダ展開）はすべて combinedClickable を使っており、ホーム画面のセルだけが独自実装だった
+- WorkspacePage に @OptIn(ExperimentalFoundationApi::class) を付与、未使用になった detectDragGesturesAfterLongPress の import を削除
+- 操作の流れ: アイコンを長押し → 全体が揺れる → そのままでも指を離してからでも、ドラッグで移動 → 「完了」ボタンで終了

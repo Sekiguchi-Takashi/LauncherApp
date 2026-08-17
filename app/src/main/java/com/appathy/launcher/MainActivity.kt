@@ -37,7 +37,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -1020,6 +1019,7 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WorkspacePage(
     pageIndex: Int,
@@ -1117,109 +1117,74 @@ fun WorkspacePage(
                                                     wiggleAngle * phase
                                                 } else 0f
                                         }
-                                        .clickable(enabled = !editMode) {
-                                            if (isSettings) {
-                                                onOpenSettingsApp()
-                                            } else if (folder != null) {
-                                                onOpenFolder(folder.id)
-                                            } else if (app != null) {
-                                                LaunchSource.rect = iconBounds
-                                                onLaunch(app)
-                                            }
-                                        }
-                                        .pointerInput(item, editMode) {
+                                        .then(
                                             if (editMode) {
-                                                detectDragGestures(
-                                                    onDragStart = { offset ->
-                                                        val start = Offset(
-                                                            c * cellW + offset.x,
-                                                            r * cellH + offset.y
-                                                        )
-                                                        dragItem = item
-                                                        dragStart = start
-                                                        dragPos = start
-                                                    },
-                                                    onDrag = { change, amount ->
-                                                        change.consume()
-                                                        dragPos += amount
-                                                    },
-                                                    onDragEnd = {
-                                                        val moving = dragItem
-                                                        if (moving != null) {
-                                                            val dist =
-                                                                (dragPos - dragStart).getDistance()
-                                                            val w = cellW * cols
-                                                            val edge = w * 0.08f
-                                                            if (dist < cellW * 0.15f) {
-                                                                menuFor = moving
-                                                            } else if (dragPos.x < edge && pageIndex > 0) {
-                                                                onMoveToPage(moving, -1)
-                                                                onScrollToPage(pageIndex - 1)
-                                                            } else if (
-                                                                dragPos.x > w - edge &&
-                                                                pageIndex < pages - 1
-                                                            ) {
-                                                                onMoveToPage(moving, 1)
-                                                                onScrollToPage(pageIndex + 1)
-                                                            } else {
-                                                                val tc = (dragPos.x / cellW).toInt()
-                                                                    .coerceIn(0, cols - 1)
-                                                                val tr = (dragPos.y / cellH).toInt()
-                                                                    .coerceIn(0, rows - 1)
-                                                                onMoveItem(moving, tr, tc)
+                                                Modifier.pointerInput(item) {
+                                                    detectDragGestures(
+                                                        onDragStart = { offset ->
+                                                            dragItem = item
+                                                            dragStart = Offset(
+                                                                c * cellW + offset.x,
+                                                                r * cellH + offset.y
+                                                            )
+                                                            dragPos = dragStart
+                                                        },
+                                                        onDrag = { change, amount ->
+                                                            change.consume()
+                                                            dragPos += amount
+                                                        },
+                                                        onDragEnd = {
+                                                            val moving = dragItem
+                                                            if (moving != null) {
+                                                                val dist = (dragPos - dragStart)
+                                                                    .getDistance()
+                                                                val w = cellW * cols
+                                                                val edge = w * 0.08f
+                                                                if (dist < cellW * 0.15f) {
+                                                                    menuFor = moving
+                                                                } else if (
+                                                                    dragPos.x < edge &&
+                                                                    pageIndex > 0
+                                                                ) {
+                                                                    onMoveToPage(moving, -1)
+                                                                    onScrollToPage(pageIndex - 1)
+                                                                } else if (
+                                                                    dragPos.x > w - edge &&
+                                                                    pageIndex < pages - 1
+                                                                ) {
+                                                                    onMoveToPage(moving, 1)
+                                                                    onScrollToPage(pageIndex + 1)
+                                                                } else {
+                                                                    val tc = (dragPos.x / cellW)
+                                                                        .toInt()
+                                                                        .coerceIn(0, cols - 1)
+                                                                    val tr = (dragPos.y / cellH)
+                                                                        .toInt()
+                                                                        .coerceIn(0, rows - 1)
+                                                                    onMoveItem(moving, tr, tc)
+                                                                }
                                                             }
-                                                        }
-                                                        dragItem = null
-                                                    },
-                                                    onDragCancel = { dragItem = null }
-                                                )
-                                                return@pointerInput
-                                            }
-                                            detectDragGesturesAfterLongPress(
-                                                onDragStart = { offset ->
-                                                    val start = Offset(
-                                                        c * cellW + offset.x,
-                                                        r * cellH + offset.y
+                                                            dragItem = null
+                                                        },
+                                                        onDragCancel = { dragItem = null }
                                                     )
-                                                    dragItem = item
-                                                    dragStart = start
-                                                    dragPos = start
-                                                },
-                                                onDrag = { change, amount ->
-                                                    change.consume()
-                                                    dragPos += amount
-                                                },
-                                                onDragEnd = {
-                                                    val moving = dragItem
-                                                    if (moving != null) {
-                                                        val dist = (dragPos - dragStart).getDistance()
-                                                        val w = cellW * cols
-                                                        val edge = w * 0.08f
-                                                        if (dist < cellW * 0.2f) {
-                                                            menuFor = moving
-                                                        } else if (dragPos.x < edge && pageIndex > 0) {
-                                                            onMoveToPage(moving, -1)
-                                                            onScrollToPage(pageIndex - 1)
-                                                        } else if (
-                                                            dragPos.x > w - edge &&
-                                                            pageIndex < pages - 1
-                                                        ) {
-                                                            onMoveToPage(moving, 1)
-                                                            onScrollToPage(pageIndex + 1)
-                                                        } else {
-                                                            val tc = (dragPos.x / cellW).toInt()
-                                                                .coerceIn(0, cols - 1)
-                                                            val tr = (dragPos.y / cellH).toInt()
-                                                                .coerceIn(0, rows - 1)
-                                                            onMoveItem(moving, tr, tc)
+                                                }
+                                            } else {
+                                                Modifier.combinedClickable(
+                                                    onClick = {
+                                                        if (isSettings) {
+                                                            onOpenSettingsApp()
+                                                        } else if (folder != null) {
+                                                            onOpenFolder(folder.id)
+                                                        } else if (app != null) {
+                                                            LaunchSource.rect = iconBounds
+                                                            onLaunch(app)
                                                         }
-                                                        if (dist >= cellW * 0.2f) onEnterEdit()
-                                                    }
-                                                    dragItem = null
-                                                },
-                                                onDragCancel = { dragItem = null }
-                                            )
-                                        }
+                                                    },
+                                                    onLongClick = { onEnterEdit() }
+                                                )
+                                            }
+                                        )
                                 ) {
                                     if (isSettings) {
                                         SettingsTileIcon()
