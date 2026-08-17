@@ -104,7 +104,7 @@ object BackupData {
         "library_only", "hidden_apps", "icon_style"
     )
     private val intKeys = listOf("pages", "rows", "cols")
-    private val boolKeys = listOf("settings_tile_hidden", "switch_icon")
+    private val boolKeys = listOf("settings_tile_hidden", "switch_icon", "home_prompt")
 
     fun serialize(context: Context): String {
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -261,6 +261,9 @@ object LauncherSettings {
     fun rows(context: Context): Int = prefs(context).getInt("rows", 5)
     fun cols(context: Context): Int = prefs(context).getInt("cols", 4)
     fun switchIcon(context: Context): Boolean = prefs(context).getBoolean("switch_icon", true)
+    fun homePrompt(context: Context): Boolean = prefs(context).getBoolean("home_prompt", true)
+    fun setHomePrompt(context: Context, v: Boolean) =
+        prefs(context).edit().putBoolean("home_prompt", v).apply()
     fun iconStyle(context: Context): IconStyle =
         IconStyle.from(prefs(context).getString("icon_style", null))
 

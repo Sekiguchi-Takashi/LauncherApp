@@ -44,7 +44,7 @@ fun iconStyleLabel(style: IconStyle): String = when (style) {
 
 private fun squirclePath(size: Float): Path {
     val path = Path()
-    val radius = size * 0.235f
+    val radius = size * IconCorner
     path.addRoundRect(RectF(0f, 0f, size, size), radius, radius, Path.Direction.CW)
     return path
 }

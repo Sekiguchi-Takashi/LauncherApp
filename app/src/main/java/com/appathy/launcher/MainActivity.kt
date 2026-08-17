@@ -233,6 +233,12 @@ fun LauncherRoot(
     var launcherSwitchOpen by remember { mutableStateOf(false) }
     var notificationsOpen by remember { mutableStateOf(false) }
     var quickPanelOpen by remember { mutableStateOf(false) }
+    var homePrompt by remember { mutableStateOf(LauncherSettings.homePrompt(context)) }
+    var askHome by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (homePrompt && !isDefaultHome(context)) askHome = true
+    }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -592,6 +598,11 @@ fun LauncherRoot(
             currentHomeLabel = HomeApps.currentLabel(context),
             notificationAccess = LauncherNotificationService.isEnabled(context),
             onOpenNotificationAccess = { LauncherNotificationService.openSettings(context) },
+            homePromptOn = homePrompt,
+            onToggleHomePrompt = {
+                homePrompt = !homePrompt
+                LauncherSettings.setHomePrompt(context, homePrompt)
+            },
             onExport = { exportLauncher.launch("launcher-backup.txt") },
             onImport = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
             onChangeWallpaper = {
@@ -612,6 +623,32 @@ fun LauncherRoot(
             onRequestDefault = { requestDefaultHome(context, homeRoleLauncher) },
             onOpenHomeSettings = { openLauncherChooser(context) },
             onDismiss = { launcherSwitchOpen = false }
+        )
+    }
+
+    if (askHome) {
+        AlertDialog(
+            onDismissRequest = { askHome = false },
+            title = { Text("ホームアプリ") },
+            text = {
+                Text("このランチャーを既定のホームアプリにしますか。ホームボタンでこの画面が開くようになります。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    askHome = false
+                    requestDefaultHome(context, homeRoleLauncher)
+                }) { Text("既定にする") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        askHome = false
+                        homePrompt = false
+                        LauncherSettings.setHomePrompt(context, false)
+                    }) { Text("今後聞かない") }
+                    TextButton(onClick = { askHome = false }) { Text("あとで") }
+                }
+            }
         )
     }
 
@@ -841,12 +878,6 @@ fun HomeScreen(
     onOpenFolder: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var isDefault by remember { mutableStateOf(isDefaultHome(context)) }
-    val roleLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        isDefault = isDefaultHome(context)
-    }
     val pagerState = rememberPagerState(pageCount = { totalPages })
     val pagerScope = rememberCoroutineScope()
 
@@ -856,26 +887,6 @@ fun HomeScreen(
             .padding(top = 48.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
-        if (!isDefault) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
-                    .clickable { requestDefaultHome(context, roleLauncher) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
-            ) {
-                Text(
-                    "ホームボタンが他のランチャーに戻ります → 既定にする",
-                    fontSize = 11.sp,
-                    color = Color.White
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-        }
 
         Box(
             Modifier
@@ -942,12 +953,12 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .padding(bottom = 8.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(alpha = 0.22f))
+                    .clip(LauncherShape.card)
+                    .background(LauncherColors.edgeStrong)
                     .clickable { onExitEdit() }
                     .padding(horizontal = 18.dp, vertical = 6.dp)
             ) {
-                Text("完了", fontSize = 13.sp, color = Color.White)
+                Text("完了", fontSize = LauncherType.label, color = Color.White)
             }
         }
 
@@ -972,9 +983,9 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .padding(horizontal = 12.dp)
-                .clip(RoundedCornerShape(30.dp))
-                .background(Color.White.copy(alpha = 0.16f))
-                .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(30.dp))
+                .clip(LauncherShape.dock)
+                .background(LauncherColors.glassStrong)
+                .border(1.dp, LauncherColors.edgeStrong, LauncherShape.dock)
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             favApps.take(4).forEach { app ->
@@ -1030,7 +1041,7 @@ fun HomeScreen(
                     .width(120.dp)
                     .height(5.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(Color.White.copy(alpha = 0.45f))
+                    .background(LauncherColors.textDim)
             )
         }
     }
@@ -1209,7 +1220,7 @@ fun WorkspacePage(
                                         SettingsTileIcon()
                                         Text(
                                             "設定",
-                                            fontSize = 11.sp,
+                                            fontSize = LauncherType.iconLabel,
                                             color = Color.White,
                                             maxLines = 1
                                         )
@@ -1217,7 +1228,7 @@ fun WorkspacePage(
                                         FolderIcon(folder = folder, resolve = resolveKey)
                                         Text(
                                             folder.name,
-                                            fontSize = 11.sp,
+                                            fontSize = LauncherType.iconLabel,
                                             color = Color.White,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1226,7 +1237,7 @@ fun WorkspacePage(
                                         AppIcon(app = app, size = 60.dp)
                                         Text(
                                             app.label,
-                                            fontSize = 11.sp,
+                                            fontSize = LauncherType.iconLabel,
                                             color = Color.White,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1240,7 +1251,7 @@ fun WorkspacePage(
                                             .offset(x = (-4).dp, y = (-4).dp)
                                             .size(20.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFFE8E8E8))
+                                            .background(LauncherColors.badge)
                                             .clickable {
                                                 if (app != null) onMoveToLibrary(appKey(app))
                                                 onRemoveItem(item)
@@ -1249,8 +1260,8 @@ fun WorkspacePage(
                                     ) {
                                         Text(
                                             "−",
-                                            fontSize = 14.sp,
-                                            color = Color(0xFF333333)
+                                            fontSize = LauncherType.bodySmall,
+                                            color = LauncherColors.badgeInk
                                         )
                                     }
                                 }
@@ -1385,7 +1396,7 @@ fun WorkspacePage(
                             Box(
                                 Modifier
                                     .fillMaxSize()
-                                    .background(Color.White.copy(alpha = 0.10f))
+                                    .background(LauncherColors.glass)
                                     .pointerInput(w) {
                                         detectDragGestures(
                                             onDrag = { change, amount ->
@@ -1436,7 +1447,7 @@ fun WorkspacePage(
                         Text(
                             "⋮",
                             color = Color.White,
-                            fontSize = 14.sp,
+                            fontSize = LauncherType.bodySmall,
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .clip(CircleShape)
@@ -1659,7 +1670,7 @@ fun FolderOverlay(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xB3000000))
+            .background(LauncherColors.scrimDim)
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { onDismiss() })
             },
@@ -1673,8 +1684,8 @@ fun FolderOverlay(
                     scaleX = scale.value
                     scaleY = scale.value
                 }
-                .clip(RoundedCornerShape(28.dp))
-                .background(Color.White.copy(alpha = 0.14f))
+                .clip(LauncherShape.overlay)
+                .background(LauncherColors.edge)
                 .pointerInput(Unit) {
                     detectTapGestures(onTap = { })
                 }
@@ -1687,7 +1698,7 @@ fun FolderOverlay(
                     onRename(it)
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(14.dp),
+                shape = LauncherShape.card,
                 modifier = Modifier.fillMaxWidth(0.7f),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Color.White,
@@ -1721,7 +1732,7 @@ fun FolderOverlay(
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 app.label,
-                                fontSize = 10.sp,
+                                fontSize = LauncherType.micro,
                                 color = Color.White,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -1784,11 +1795,11 @@ fun AppLibraryPage(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
+                        .clip(LauncherShape.sheet)
+                        .background(LauncherColors.glassRaised)
                         .padding(10.dp)
                 ) {
-                    Text(name, fontSize = 12.sp, color = Color.White)
+                    Text(name, fontSize = LauncherType.caption, color = Color.White)
                     Spacer(Modifier.height(6.dp))
                     val rowsOfApps = list.chunked(4)
                     rowsOfApps.take(2).forEach { chunk ->
@@ -1846,7 +1857,7 @@ fun AppLibraryPage(
                     if (list.size > 8) {
                         Text(
                             "ほか " + (list.size - 8) + " 件",
-                            fontSize = 10.sp,
+                            fontSize = LauncherType.micro,
                             color = Color.White.copy(alpha = 0.7f)
                         )
                     }
@@ -1872,7 +1883,7 @@ fun SpotlightSearch(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color(0xE60B0D10))
+            .background(LauncherColors.scrim)
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(48.dp))
@@ -1893,7 +1904,7 @@ fun SpotlightSearch(
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White,
-                focusedBorderColor = Color.White.copy(alpha = 0.5f),
+                focusedBorderColor = LauncherColors.textDim,
                 unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
                 focusedPlaceholderColor = Color.Gray,
                 unfocusedPlaceholderColor = Color.Gray,
@@ -1915,15 +1926,15 @@ fun SpotlightSearch(
                             Modifier
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color.White.copy(alpha = 0.14f)),
+                                .background(LauncherColors.edge),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("W", fontSize = 16.sp, color = Color.White)
+                            Text("W", fontSize = LauncherType.sectionValue, color = Color.White)
                         }
                         Spacer(Modifier.width(12.dp))
                         Text(
                             "「" + query + "」をWebで検索",
-                            fontSize = 15.sp,
+                            fontSize = LauncherType.body,
                             color = Color.White
                         )
                     }
@@ -1945,7 +1956,7 @@ fun SpotlightSearch(
                     ) {
                         AppIcon(app = app, size = 40.dp)
                         Spacer(Modifier.width(12.dp))
-                        Text(app.label, fontSize = 15.sp, color = Color.White)
+                        Text(app.label, fontSize = LauncherType.body, color = Color.White)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
@@ -1985,7 +1996,7 @@ fun AppIcon(
                 .size(size)
                 .shadow(
                     elevation = 6.dp,
-                    shape = RoundedCornerShape(size * 0.235f),
+                    shape = RoundedCornerShape(size * IconCorner),
                     clip = false
                 )
         )
@@ -1993,8 +2004,8 @@ fun AppIcon(
         Box(
             modifier
                 .size(size)
-                .clip(RoundedCornerShape(size * 0.225f))
-                .background(Color.White.copy(alpha = 0.12f))
+                .clip(RoundedCornerShape(size * IconCorner))
+                .background(LauncherColors.glassRaised)
         )
     }
 }
@@ -2004,8 +2015,8 @@ fun SettingsTileIcon(size: Dp = 60.dp) {
     Box(
         Modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.235f))
-            .background(Color(0xFF6E6E73)),
+            .clip(RoundedCornerShape(size * IconCorner))
+            .background(LauncherColors.settingsTile),
         contentAlignment = Alignment.Center
     ) {
         Image(
@@ -2020,16 +2031,16 @@ fun SettingsTileIcon(size: Dp = 60.dp) {
 fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Text(
         title,
-        fontSize = 12.sp,
-        color = Color.White.copy(alpha = 0.6f),
+        fontSize = LauncherType.caption,
+        color = LauncherColors.textMuted,
         modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
     )
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.10f))
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+            .clip(LauncherShape.panel)
+            .background(LauncherColors.glass)
+            .border(1.dp, LauncherColors.edge, LauncherShape.panel)
     ) {
         content()
     }
@@ -2050,9 +2061,9 @@ fun SettingsRow(
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 14.dp, vertical = 13.dp)
     ) {
-        Text(label, fontSize = 15.sp, color = Color.White, modifier = Modifier.weight(1f))
+        Text(label, fontSize = LauncherType.body, color = Color.White, modifier = Modifier.weight(1f))
         if (value != null) {
-            Text(value, fontSize = 14.sp, color = Color.White.copy(alpha = 0.6f))
+            Text(value, fontSize = LauncherType.bodySmall, color = LauncherColors.textMuted)
         }
         if (trailing != null) {
             Spacer(Modifier.width(8.dp))
@@ -2060,7 +2071,7 @@ fun SettingsRow(
         }
         if (onClick != null && trailing == null) {
             Spacer(Modifier.width(8.dp))
-            Text("›", fontSize = 18.sp, color = Color.White.copy(alpha = 0.5f))
+            Text("›", fontSize = 18.sp, color = LauncherColors.textDim)
         }
     }
 }
@@ -2123,6 +2134,8 @@ fun SettingsApp(
     currentHomeLabel: String,
     notificationAccess: Boolean,
     onOpenNotificationAccess: () -> Unit,
+    homePromptOn: Boolean,
+    onToggleHomePrompt: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     onChangeWallpaper: () -> Unit,
@@ -2139,12 +2152,12 @@ fun SettingsApp(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color(0xF20B0D10))
+            .background(LauncherColors.scrimOpaque)
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(44.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("設定", fontSize = 28.sp, color = Color.White, modifier = Modifier.weight(1f))
+            Text("設定", fontSize = LauncherType.screenTitle, color = Color.White, modifier = Modifier.weight(1f))
             TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
         }
         Spacer(Modifier.height(16.dp))
@@ -2158,8 +2171,8 @@ fun SettingsApp(
                             trailing = {
                                 Text(
                                     if (style == iconStyle) "✓" else "",
-                                    color = Color(0xFF7FA6D8),
-                                    fontSize = 16.sp
+                                    color = LauncherColors.accent,
+                                    fontSize = LauncherType.sectionValue
                                 )
                             },
                             onClick = { onIconStyle(style) }
@@ -2211,6 +2224,11 @@ fun SettingsApp(
                         onClick = onOpenLauncherSwitch
                     )
                     SettingsRow(label = "ホーム設定を開く", onClick = onOpenHomeSettings)
+                    SettingsRow(
+                        label = "起動時に既定のホームを確認",
+                        value = if (homePromptOn) "する" else "しない",
+                        onClick = onToggleHomePrompt
+                    )
                     SettingsRow(
                         label = "通知へのアクセス",
                         value = if (notificationAccess) "許可済み" else "未許可",
@@ -2269,18 +2287,18 @@ fun AppListScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color(0xF20B0D10))
+            .background(LauncherColors.scrimOpaque)
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(44.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("アプリ一覧", fontSize = 26.sp, color = Color.White, modifier = Modifier.weight(1f))
+            Text("アプリ一覧", fontSize = LauncherType.screenTitle, color = Color.White, modifier = Modifier.weight(1f))
             TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
         }
         Text(
             "全 " + apps.size + " 件 / 非表示 " + hiddenApps.size + " 件",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.55f)
+            fontSize = LauncherType.caption,
+            color = LauncherColors.textMuted
         )
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
@@ -2288,12 +2306,12 @@ fun AppListScreen(
             onValueChange = { query = it },
             placeholder = { Text("アプリ名で絞り込み") },
             singleLine = true,
-            shape = RoundedCornerShape(14.dp),
+            shape = LauncherShape.card,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White,
-                focusedBorderColor = Color.White.copy(alpha = 0.5f),
+                focusedBorderColor = LauncherColors.textDim,
                 unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
                 focusedPlaceholderColor = Color.Gray,
                 unfocusedPlaceholderColor = Color.Gray,
@@ -2304,7 +2322,7 @@ fun AppListScreen(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
+                .clip(LauncherShape.chip)
                 .background(
                     if (showHiddenOnly) Color.White.copy(alpha = 0.18f)
                     else Color.White.copy(alpha = 0.07f)
@@ -2314,7 +2332,7 @@ fun AppListScreen(
         ) {
             Text(
                 if (showHiddenOnly) "非表示のみ表示中" else "非表示だけを見る",
-                fontSize = 13.sp,
+                fontSize = LauncherType.label,
                 color = Color.White
             )
         }
@@ -2329,8 +2347,8 @@ fun AppListScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
+                        .clip(LauncherShape.card)
+                        .background(LauncherColors.glassSoft)
                         .padding(10.dp)
                 ) {
                     AppIcon(app = app, size = 38.dp)
@@ -2338,15 +2356,15 @@ fun AppListScreen(
                     Column(Modifier.weight(1f)) {
                         Text(
                             app.label,
-                            fontSize = 14.sp,
-                            color = if (isHidden) Color.White.copy(alpha = 0.5f) else Color.White,
+                            fontSize = LauncherType.bodySmall,
+                            color = if (isHidden) LauncherColors.textDim else Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             if (isHidden) "非表示中" else app.packageName,
-                            fontSize = 10.sp,
-                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = LauncherType.micro,
+                            color = LauncherColors.textDim,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -2354,15 +2372,15 @@ fun AppListScreen(
                     TextButton(onClick = { if (isHidden) onUnhide(key) else onHide(key) }) {
                         Text(
                             if (isHidden) "表示" else "非表示",
-                            fontSize = 13.sp,
-                            color = if (isHidden) Color(0xFF5BD6A8) else Color.White
+                            fontSize = LauncherType.label,
+                            color = if (isHidden) LauncherColors.positive else Color.White
                         )
                     }
                     TextButton(onClick = { onUninstall(app.packageName) }) {
-                        Text("削除", fontSize = 13.sp, color = Color(0xFFE2687A))
+                        Text("削除", fontSize = LauncherType.label, color = LauncherColors.danger)
                     }
                     TextButton(onClick = { onAppInfo(app.packageName) }) {
-                        Text("情報", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+                        Text("情報", fontSize = LauncherType.label, color = Color.White.copy(alpha = 0.7f))
                     }
                 }
             }
@@ -2380,15 +2398,15 @@ fun ControlTile(
 ) {
     Column(
         modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.12f))
-            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            .clip(LauncherShape.sheet)
+            .background(LauncherColors.glassRaised)
+            .border(1.dp, LauncherColors.glassStrong, LauncherShape.sheet)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 16.dp)
     ) {
-        Text(label, fontSize = 14.sp, color = Color.White)
+        Text(label, fontSize = LauncherType.bodySmall, color = Color.White)
         if (sub != null) {
-            Text(sub, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f))
+            Text(sub, fontSize = LauncherType.iconLabel, color = LauncherColors.textMuted)
         }
     }
 }
@@ -2403,7 +2421,7 @@ fun ControlCenter(onDismiss: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xCC05070A))
+            .background(LauncherColors.scrimControl)
             .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) },
         contentAlignment = Alignment.TopCenter
     ) {
@@ -2417,7 +2435,7 @@ fun ControlCenter(onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "コントロール",
-                    fontSize = 22.sp,
+                    fontSize = LauncherType.panelTitle,
                     color = Color.White,
                     modifier = Modifier.weight(1f)
                 )
@@ -2459,12 +2477,12 @@ fun ControlCenter(onDismiss: () -> Unit) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.White.copy(alpha = 0.10f))
-                    .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
+                    .clip(LauncherShape.sheet)
+                    .background(LauncherColors.glass)
+                    .border(1.dp, LauncherColors.edge, LauncherShape.sheet)
                     .padding(14.dp)
             ) {
-                Text("明るさ", fontSize = 13.sp, color = Color.White)
+                Text("明るさ", fontSize = LauncherType.label, color = Color.White)
                 if (canWrite) {
                     Slider(
                         value = brightness,
@@ -2477,19 +2495,19 @@ fun ControlCenter(onDismiss: () -> Unit) {
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "変更するには設定の書き込み許可が必要です",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.6f)
+                        fontSize = LauncherType.iconLabel,
+                        color = LauncherColors.textMuted
                     )
                     TextButton(onClick = {
                         SystemControl.requestWriteSettings(context)
                         canWrite = SystemControl.canWriteSettings(context)
                     }) {
-                        Text("許可する", color = Color(0xFF7FA6D8))
+                        Text("許可する", color = LauncherColors.accent)
                     }
                 }
 
                 Spacer(Modifier.height(10.dp))
-                Text("音量", fontSize = 13.sp, color = Color.White)
+                Text("音量", fontSize = LauncherType.label, color = Color.White)
                 Slider(
                     value = volume,
                     onValueChange = {
@@ -2544,14 +2562,14 @@ fun LauncherSwitchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color(0xF20B0D10))
+            .background(LauncherColors.scrimOpaque)
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(44.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "ホームアプリ",
-                fontSize = 26.sp,
+                fontSize = LauncherType.screenTitle,
                 color = Color.White,
                 modifier = Modifier.weight(1f)
             )
@@ -2562,19 +2580,19 @@ fun LauncherSwitchScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.White.copy(alpha = 0.10f))
-                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+                .clip(LauncherShape.panel)
+                .background(LauncherColors.glass)
+                .border(1.dp, LauncherColors.edge, LauncherShape.panel)
                 .padding(14.dp)
         ) {
-            Text("現在の既定", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
-            Text(currentLabel, fontSize = 17.sp, color = Color.White)
+            Text("現在の既定", fontSize = LauncherType.caption, color = LauncherColors.textMuted)
+            Text(currentLabel, fontSize = LauncherType.sectionValue, color = Color.White)
             if (!isDefaultNow) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "ホームボタンを押すと上のアプリが開きます。このランチャーを使うには既定を変更してください。",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.6f)
+                    fontSize = LauncherType.caption,
+                    color = LauncherColors.textMuted
                 )
             }
         }
@@ -2585,15 +2603,15 @@ fun LauncherSwitchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF2C4A6E))
+                    .clip(LauncherShape.card)
+                    .background(LauncherColors.action)
                     .clickable {
                         onRequestDefault()
                         reloadKey += 1
                     }
                     .padding(14.dp)
             ) {
-                Text("このランチャーを既定にする", fontSize = 15.sp, color = Color.White)
+                Text("このランチャーを既定にする", fontSize = LauncherType.body, color = Color.White)
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -2601,22 +2619,22 @@ fun LauncherSwitchScreen(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.White.copy(alpha = 0.10f))
+                .clip(LauncherShape.card)
+                .background(LauncherColors.glass)
                 .clickable {
                     onOpenHomeSettings()
                     reloadKey += 1
                 }
                 .padding(14.dp)
         ) {
-            Text("システムのホーム設定を開く", fontSize = 15.sp, color = Color.White)
+            Text("システムのホーム設定を開く", fontSize = LauncherType.body, color = Color.White)
         }
 
         Spacer(Modifier.height(20.dp))
         Text(
             "インストール済みのホームアプリ",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.6f)
+            fontSize = LauncherType.caption,
+            color = LauncherColors.textMuted
         )
         Spacer(Modifier.height(8.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2626,23 +2644,23 @@ fun LauncherSwitchScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
+                        .clip(LauncherShape.card)
+                        .background(LauncherColors.glassSoft)
                         .padding(12.dp)
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(app.label, fontSize = 14.sp, color = Color.White)
+                        Text(app.label, fontSize = LauncherType.bodySmall, color = Color.White)
                         Text(
                             if (app.isCurrent) "既定" else app.packageName,
-                            fontSize = 10.sp,
-                            color = if (app.isCurrent) Color(0xFF5BD6A8)
-                            else Color.White.copy(alpha = 0.45f),
+                            fontSize = LauncherType.micro,
+                            color = if (app.isCurrent) LauncherColors.positive
+                            else LauncherColors.textDim,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                     TextButton(onClick = { HomeApps.open(context, app) }) {
-                        Text("開く", fontSize = 13.sp, color = Color.White)
+                        Text("開く", fontSize = LauncherType.label, color = Color.White)
                     }
                 }
             }
@@ -2650,8 +2668,8 @@ fun LauncherSwitchScreen(
                 Spacer(Modifier.height(10.dp))
                 Text(
                     "「開く」はそのホームアプリを一度だけ起動します。既定そのものを変えるには上の2つのボタンを使ってください。Android では他アプリを既定に設定する操作をアプリ側から行えないためです。",
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.5f)
+                    fontSize = LauncherType.iconLabel,
+                    color = LauncherColors.textDim
                 )
                 Spacer(Modifier.height(24.dp))
             }
@@ -2668,7 +2686,7 @@ fun NotificationCenterScreen(onDismiss: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xE60B0D10))
+            .background(LauncherColors.scrim)
             .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }
     ) {
         Column(
@@ -2679,10 +2697,10 @@ fun NotificationCenterScreen(onDismiss: () -> Unit) {
         ) {
             Spacer(Modifier.height(44.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("通知", fontSize = 26.sp, color = Color.White, modifier = Modifier.weight(1f))
+                Text("通知", fontSize = LauncherType.screenTitle, color = Color.White, modifier = Modifier.weight(1f))
                 if (enabled && items.isNotEmpty()) {
                     TextButton(onClick = { LauncherNotificationService.dismissAll() }) {
-                        Text("すべて消去", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+                        Text("すべて消去", color = Color.White.copy(alpha = 0.8f), fontSize = LauncherType.label)
                     }
                 }
                 TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
@@ -2693,30 +2711,30 @@ fun NotificationCenterScreen(onDismiss: () -> Unit) {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.10f))
-                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+                        .clip(LauncherShape.panel)
+                        .background(LauncherColors.glass)
+                        .border(1.dp, LauncherColors.edge, LauncherShape.panel)
                         .padding(14.dp)
                 ) {
-                    Text("通知の読み取りが許可されていません", fontSize = 14.sp, color = Color.White)
+                    Text("通知の読み取りが許可されていません", fontSize = LauncherType.bodySmall, color = Color.White)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "通知へのアクセスを許可すると、ここに通知が並び、再生中の曲も表示できます。",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.6f)
+                        fontSize = LauncherType.caption,
+                        color = LauncherColors.textMuted
                     )
                     TextButton(onClick = {
                         LauncherNotificationService.openSettings(context)
                         enabled = LauncherNotificationService.isEnabled(context)
                     }) {
-                        Text("許可する", color = Color(0xFF7FA6D8))
+                        Text("許可する", color = LauncherColors.accent)
                     }
                 }
             } else if (items.isEmpty()) {
                 Text(
                     "通知はありません",
-                    fontSize = 14.sp,
-                    color = Color.White.copy(alpha = 0.5f)
+                    fontSize = LauncherType.bodySmall,
+                    color = LauncherColors.textDim
                 )
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2725,27 +2743,27 @@ fun NotificationCenterScreen(onDismiss: () -> Unit) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.White.copy(alpha = 0.11f))
+                                .clip(LauncherShape.panel)
+                                .background(LauncherColors.glassRaised)
                                 .border(
                                     1.dp,
-                                    Color.White.copy(alpha = 0.14f),
-                                    RoundedCornerShape(16.dp)
+                                    LauncherColors.edge,
+                                    LauncherShape.panel
                                 )
                                 .padding(12.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     n.appLabel,
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = LauncherType.iconLabel,
+                                    color = LauncherColors.textMuted,
                                     modifier = Modifier.weight(1f)
                                 )
                                 if (n.clearable) {
                                     Text(
                                         "×",
-                                        fontSize = 16.sp,
-                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = LauncherType.sectionValue,
+                                        color = LauncherColors.textMuted,
                                         modifier = Modifier.clickable {
                                             LauncherNotificationService.dismiss(n.key)
                                         }
@@ -2753,12 +2771,12 @@ fun NotificationCenterScreen(onDismiss: () -> Unit) {
                                 }
                             }
                             if (n.title.isNotBlank()) {
-                                Text(n.title, fontSize = 14.sp, color = Color.White)
+                                Text(n.title, fontSize = LauncherType.bodySmall, color = Color.White)
                             }
                             if (n.text.isNotBlank()) {
                                 Text(
                                     n.text,
-                                    fontSize = 12.sp,
+                                    fontSize = LauncherType.caption,
                                     color = Color.White.copy(alpha = 0.75f),
                                     maxLines = 3,
                                     overflow = TextOverflow.Ellipsis
@@ -2779,20 +2797,20 @@ fun NowPlayingCard(nowPlaying: NowPlaying) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.12f))
-            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            .clip(LauncherShape.sheet)
+            .background(LauncherColors.glassRaised)
+            .border(1.dp, LauncherColors.glassStrong, LauncherShape.sheet)
             .padding(14.dp)
     ) {
         Text(
             nowPlaying.appLabel + (if (nowPlaying.isPlaying) " · 再生中" else " · 一時停止"),
-            fontSize = 11.sp,
-            color = Color.White.copy(alpha = 0.55f)
+            fontSize = LauncherType.iconLabel,
+            color = LauncherColors.textMuted
         )
         Spacer(Modifier.height(4.dp))
         Text(
             nowPlaying.title,
-            fontSize = 16.sp,
+            fontSize = LauncherType.sectionValue,
             color = Color.White,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -2800,7 +2818,7 @@ fun NowPlayingCard(nowPlaying: NowPlaying) {
         if (nowPlaying.artist.isNotBlank()) {
             Text(
                 nowPlaying.artist,
-                fontSize = 12.sp,
+                fontSize = LauncherType.caption,
                 color = Color.White.copy(alpha = 0.7f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -2809,13 +2827,13 @@ fun NowPlayingCard(nowPlaying: NowPlaying) {
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { SystemControl.previous(context) }) {
-                Text("前の曲", color = Color.White, fontSize = 13.sp)
+                Text("前の曲", color = Color.White, fontSize = LauncherType.label)
             }
             TextButton(onClick = { SystemControl.playPause(context) }) {
-                Text("再生 / 停止", color = Color.White, fontSize = 13.sp)
+                Text("再生 / 停止", color = Color.White, fontSize = LauncherType.label)
             }
             TextButton(onClick = { SystemControl.next(context) }) {
-                Text("次の曲", color = Color.White, fontSize = 13.sp)
+                Text("次の曲", color = Color.White, fontSize = LauncherType.label)
             }
         }
     }
@@ -2841,7 +2859,7 @@ fun QuickPanel(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xE60B0D10))
+            .background(LauncherColors.scrim)
             .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }
     ) {
         Column(
@@ -2854,7 +2872,7 @@ fun QuickPanel(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     if (showWidgets) "ウィジェットを選ぶ" else "メニュー",
-                    fontSize = 24.sp,
+                    fontSize = LauncherType.panelTitle,
                     color = Color.White,
                     modifier = Modifier.weight(1f)
                 )
@@ -2906,8 +2924,8 @@ fun QuickPanel(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.09f))
+                                .clip(LauncherShape.card)
+                                .background(LauncherColors.glassSoft)
                                 .clickable {
                                     onDismiss()
                                     onSelectWidget(provider)
@@ -2916,7 +2934,7 @@ fun QuickPanel(
                         ) {
                             Text(
                                 provider.loadLabel(context.packageManager),
-                                fontSize = 14.sp,
+                                fontSize = LauncherType.bodySmall,
                                 color = Color.White,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -2937,16 +2955,16 @@ fun QuickAction(title: String, sub: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.10f))
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+            .clip(LauncherShape.panel)
+            .background(LauncherColors.glass)
+            .border(1.dp, LauncherColors.edge, LauncherShape.panel)
             .clickable { onClick() }
             .padding(horizontal = 14.dp, vertical = 13.dp)
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, color = Color.White)
-            Text(sub, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f))
+            Text(title, fontSize = LauncherType.body, color = Color.White)
+            Text(sub, fontSize = LauncherType.iconLabel, color = LauncherColors.textMuted)
         }
-        Text("›", fontSize = 18.sp, color = Color.White.copy(alpha = 0.5f))
+        Text("›", fontSize = 18.sp, color = LauncherColors.textDim)
     }
 }

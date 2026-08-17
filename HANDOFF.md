@@ -327,3 +327,16 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 編集モード中はウィジェットもアイコンと一緒に揺れる（振れ幅はアイコンの 0.4 倍に抑えた）
 - WorkspacePage / HomeScreen に onMoveWidget, onResizeWidget を追加。保存は既存の saveWidgets 経由
 - 従来の「⋮」メニュー（位置とサイズを編集 / ページ移動 / 削除）はそのまま残している
+
+## v3.2 実装済み（デザイントークン化・既定ホームの確認を起動時のみに）
+- Theme.kt を新設し、色 / 文字サイズ / 角丸 / アイコンサイズをトークン化
+  - LauncherColors: text, textMuted, textDim, accent, positive, danger, action, glass 系4段階, edge 2段階, scrim 系4種, settingsTile, badge
+  - LauncherType: screenTitle, panelTitle, sectionValue, body, bodySmall, label, caption, iconLabel, micro
+  - LauncherShape: card, panel, sheet, dock, overlay, chip
+  - LauncherSize: icon 60dp ほか各所のアイコン寸法
+  - IconCorner (0.235f): squircle の角丸係数。IconUtil.kt の描画側と Compose 側の両方が参照する
+  - MainActivity 内の色リテラル 60箇所超、fontSize 62箇所、RoundedCornerShape 31箇所を置換
+- 既定ホームの確認をやめて、アプリ起動時に1回だけ聞く方式に変更
+  - 画面上部に常時出ていた「デフォルトのホームに設定」バナーを削除（HomeScreen 内の isDefault / roleLauncher も不要になったため撤去）
+  - LauncherRoot の LaunchedEffect で、起動時に既定でなければ AlertDialog を1回だけ表示。選択肢は「既定にする」「あとで」「今後聞かない」
+  - 「今後聞かない」は LauncherSettings.homePrompt("home_prompt") に保存。設定 > 壁紙とシステム の「起動時に既定のホームを確認」で戻せる。バックアップ対象にも追加
