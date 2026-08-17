@@ -70,6 +70,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -187,6 +188,7 @@ fun LauncherRoot(
     var settingsTileHidden by remember { mutableStateOf(SettingsTile.hidden(context)) }
     var hiddenApps by remember { mutableStateOf(HiddenApps.load(context)) }
     var appListOpen by remember { mutableStateOf(false) }
+    var controlOpen by remember { mutableStateOf(false) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -384,6 +386,7 @@ fun LauncherRoot(
             host = host,
             awm = awm,
             onOpenSearch = { searchOpen = true },
+            onOpenControlCenter = { controlOpen = true },
             onLaunch = { launchApp(context, it, rootView) },
             onRemoveItem = { item ->
                 saveHome(homeItems - item)
@@ -493,6 +496,7 @@ fun LauncherRoot(
     BackHandler(enabled = folderOpen) { openFolderId = null }
     BackHandler(enabled = settingsAppOpen) { settingsAppOpen = false }
     BackHandler(enabled = appListOpen) { appListOpen = false }
+    BackHandler(enabled = controlOpen) { controlOpen = false }
 
     if (settingsAppOpen) {
         SettingsApp(
@@ -535,6 +539,10 @@ fun LauncherRoot(
             },
             onDismiss = { settingsAppOpen = false }
         )
+    }
+
+    if (controlOpen) {
+        ControlCenter(onDismiss = { controlOpen = false })
     }
 
     if (appListOpen) {
@@ -725,6 +733,7 @@ fun HomeScreen(
     host: AppWidgetHost,
     awm: AppWidgetManager,
     onOpenSearch: () -> Unit,
+    onOpenControlCenter: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onRemoveItem: (HomeItem) -> Unit,
     onMoveItem: (HomeItem, Int, Int) -> Unit,
@@ -756,8 +765,17 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectVerticalDragGestures { _, dragAmount ->
-                    if (dragAmount > 20) onOpenSearch()
+                var startX = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { offset -> startX = offset.x }
+                ) { _, dragAmount ->
+                    if (dragAmount > 20) {
+                        if (startX > size.width * 0.6f) {
+                            onOpenControlCenter()
+                        } else {
+                            onOpenSearch()
+                        }
+                    }
                 }
             }
             .padding(top = 48.dp, bottom = 12.dp),
@@ -836,6 +854,13 @@ fun HomeScreen(
                     onClick = {
                         homeMenu = false
                         onOpenSearch()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("コントロール") },
+                    onClick = {
+                        homeMenu = false
+                        onOpenControlCenter()
                     }
                 )
                 if (!isDefault) {
@@ -2182,6 +2207,159 @@ fun AppListScreen(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+fun ControlTile(
+    label: String,
+    sub: String? = null,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 16.dp)
+    ) {
+        Text(label, fontSize = 14.sp, color = Color.White)
+        if (sub != null) {
+            Text(sub, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f))
+        }
+    }
+}
+
+@Composable
+fun ControlCenter(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var canWrite by remember { mutableStateOf(SystemControl.canWriteSettings(context)) }
+    var brightness by remember { mutableStateOf(SystemControl.brightness(context)) }
+    var volume by remember { mutableStateOf(SystemControl.volume(context)) }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xCC05070A))
+            .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) },
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .pointerInput(Unit) { detectTapGestures(onTap = { }) }
+        ) {
+            Spacer(Modifier.height(32.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "コントロール",
+                    fontSize = 22.sp,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ControlTile(
+                    label = "Wi-Fi",
+                    sub = "設定を開く",
+                    onClick = { SystemControl.openWifi(context) },
+                    modifier = Modifier.weight(1f)
+                )
+                ControlTile(
+                    label = "Bluetooth",
+                    sub = "設定を開く",
+                    onClick = { SystemControl.openBluetooth(context) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ControlTile(
+                    label = "機内モード",
+                    sub = "設定を開く",
+                    onClick = { SystemControl.openAirplaneMode(context) },
+                    modifier = Modifier.weight(1f)
+                )
+                ControlTile(
+                    label = "画面",
+                    sub = "表示設定",
+                    onClick = { SystemControl.openDisplay(context) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
+                    .padding(14.dp)
+            ) {
+                Text("明るさ", fontSize = 13.sp, color = Color.White)
+                if (canWrite) {
+                    Slider(
+                        value = brightness,
+                        onValueChange = {
+                            brightness = it
+                            SystemControl.setBrightness(context, it)
+                        }
+                    )
+                } else {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "変更するには設定の書き込み許可が必要です",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                    TextButton(onClick = {
+                        SystemControl.requestWriteSettings(context)
+                        canWrite = SystemControl.canWriteSettings(context)
+                    }) {
+                        Text("許可する", color = Color(0xFF7FA6D8))
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text("音量", fontSize = 13.sp, color = Color.White)
+                Slider(
+                    value = volume,
+                    onValueChange = {
+                        volume = it
+                        SystemControl.setVolume(context, it)
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                ControlTile(
+                    label = "前の曲",
+                    onClick = { SystemControl.previous(context) },
+                    modifier = Modifier.weight(1f)
+                )
+                ControlTile(
+                    label = "再生 / 停止",
+                    onClick = { SystemControl.playPause(context) },
+                    modifier = Modifier.weight(1f)
+                )
+                ControlTile(
+                    label = "次の曲",
+                    onClick = { SystemControl.next(context) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }

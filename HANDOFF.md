@@ -231,3 +231,14 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 削除は ACTION_DELETE でシステムのアンインストール確認へ遷移。完了後は PACKAGE_REMOVED を受けて一覧が更新される
 - 非表示にしたとき: ホームの配置から除去、フォルダの中身からも除去、Dock（お気に入り）からも除去。表示に戻すと autoPlace が空きセルへ再配置する
 - LauncherRoot は visibleApps（apps から hiddenApps を除いたもの）をホーム・検索・フォルダ・自動配置へ渡す。設定とアプリ一覧だけが全件の apps を受け取る
+
+## v2.5 実装済み（コントロールセンター）
+- SystemControl.kt を新設。Android で実際に操作できるものだけを扱う
+  - 明るさ: Settings.System.SCREEN_BRIGHTNESS。WRITE_SETTINGS 権限が要るため Settings.System.canWrite() で判定し、未許可なら「許可する」ボタンから ACTION_MANAGE_WRITE_SETTINGS へ誘導。変更時は自動調整を手動モードへ切り替える
+  - 音量: AudioManager の STREAM_MUSIC。権限不要
+  - メディア操作: AudioManager.dispatchMediaKeyEvent で 前の曲 / 再生・停止 / 次の曲。通知アクセス権限を取らずに再生中アプリを操作できる
+  - Wi-Fi / Bluetooth / 機内モード / 画面: Android 10 以降トグル操作が禁止されているため、設定パネル（Settings.Panel.ACTION_WIFI など）を開く導線のみ
+- ControlCenter コンポーザブル: 暗幕＋ガラスタイル。タイル2列、明るさと音量のスライダー、メディア操作3ボタン
+- 開き方は2つ: 画面右寄り（幅の60%より右）から下スワイプ、またはホーム長押しメニューの「コントロール」
+  - 左寄りの下スワイプは従来どおり Spotlight 検索。detectVerticalDragGestures の onDragStart で開始 X 座標を見て振り分ける
+- AndroidManifest に WRITE_SETTINGS を追加
