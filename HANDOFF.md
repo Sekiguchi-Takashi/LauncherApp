@@ -255,3 +255,14 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - インストール済みホームアプリ一覧。各行の「開く」でそのランチャーを一度だけ起動できる
   - 注意書き: Android では他アプリを既定に設定する操作をアプリ側から行えないため、既定変更は上記2ボタン経由になる
 - ホーム画面上部に、既定でないときだけ案内バナーを表示（タップで RoleManager のダイアログ）
+
+## v2.7 実装済み（通知センター・再生中カード）
+- NotificationCenter.kt を新設
+  - LauncherNotificationService : NotificationListenerService。activeNotifications を NotifItem に変換して companion の mutableStateListOf に保持し、投稿・削除のたびに更新
+  - dismiss(key) / dismissAll() で個別・一括消去。isEnabled() は Settings.Secure の enabled_notification_listeners を見る。openSettings() で許可画面へ
+  - MediaInfo.current(): MediaSessionManager.getActiveSessions に本サービスの ComponentName を渡して再生中の曲名・アーティスト・アプリ名・再生状態を取得（通知アクセス権限が前提）
+- AndroidManifest に BIND_NOTIFICATION_LISTENER_SERVICE のサービスを登録
+- NotificationCenterScreen: 未許可なら説明と「許可する」、許可済みなら通知カード一覧（アプリ名 / タイトル / 本文、消去可能なものに ×、上部に「すべて消去」）
+- コントロールセンターの上部に NowPlayingCard を追加（再生中のときだけ表示、曲名・アーティスト・前後送りと再生停止）
+- 下スワイプのジェスチャーを3分割に変更: 左33%未満=通知、中央=Spotlight検索、右66%超=コントロール。長押しメニューにも「通知」を追加
+- 設定 > 壁紙とシステム に「通知へのアクセス」（許可済み / 未許可）を追加

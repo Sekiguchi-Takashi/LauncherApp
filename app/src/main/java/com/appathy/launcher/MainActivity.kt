@@ -193,6 +193,7 @@ fun LauncherRoot(
     var appListOpen by remember { mutableStateOf(false) }
     var controlOpen by remember { mutableStateOf(false) }
     var launcherSwitchOpen by remember { mutableStateOf(false) }
+    var notificationsOpen by remember { mutableStateOf(false) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -391,6 +392,7 @@ fun LauncherRoot(
             awm = awm,
             onOpenSearch = { searchOpen = true },
             onOpenControlCenter = { controlOpen = true },
+            onOpenNotifications = { notificationsOpen = true },
             onLaunch = { launchApp(context, it, rootView) },
             onRemoveItem = { item ->
                 saveHome(homeItems - item)
@@ -502,6 +504,7 @@ fun LauncherRoot(
     BackHandler(enabled = appListOpen) { appListOpen = false }
     BackHandler(enabled = controlOpen) { controlOpen = false }
     BackHandler(enabled = launcherSwitchOpen) { launcherSwitchOpen = false }
+    BackHandler(enabled = notificationsOpen) { notificationsOpen = false }
 
     if (settingsAppOpen) {
         SettingsApp(
@@ -539,6 +542,8 @@ fun LauncherRoot(
                 launcherSwitchOpen = true
             },
             currentHomeLabel = HomeApps.currentLabel(context),
+            notificationAccess = LauncherNotificationService.isEnabled(context),
+            onOpenNotificationAccess = { LauncherNotificationService.openSettings(context) },
             onChangeWallpaper = {
                 runCatching {
                     context.startActivity(
@@ -558,6 +563,10 @@ fun LauncherRoot(
             onOpenHomeSettings = { openLauncherChooser(context) },
             onDismiss = { launcherSwitchOpen = false }
         )
+    }
+
+    if (notificationsOpen) {
+        NotificationCenterScreen(onDismiss = { notificationsOpen = false })
     }
 
     if (controlOpen) {
@@ -753,6 +762,7 @@ fun HomeScreen(
     awm: AppWidgetManager,
     onOpenSearch: () -> Unit,
     onOpenControlCenter: () -> Unit,
+    onOpenNotifications: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onRemoveItem: (HomeItem) -> Unit,
     onMoveItem: (HomeItem, Int, Int) -> Unit,
@@ -789,10 +799,10 @@ fun HomeScreen(
                     onDragStart = { offset -> startX = offset.x }
                 ) { _, dragAmount ->
                     if (dragAmount > 20) {
-                        if (startX > size.width * 0.6f) {
-                            onOpenControlCenter()
-                        } else {
-                            onOpenSearch()
+                        when {
+                            startX > size.width * 0.66f -> onOpenControlCenter()
+                            startX < size.width * 0.33f -> onOpenNotifications()
+                            else -> onOpenSearch()
                         }
                     }
                 }
@@ -900,6 +910,13 @@ fun HomeScreen(
                     onClick = {
                         homeMenu = false
                         onOpenControlCenter()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("通知") },
+                    onClick = {
+                        homeMenu = false
+                        onOpenNotifications()
                     }
                 )
                 if (!isDefault) {
@@ -2029,6 +2046,8 @@ fun SettingsApp(
     onOpenHomeSettings: () -> Unit,
     onOpenLauncherSwitch: () -> Unit,
     currentHomeLabel: String,
+    notificationAccess: Boolean,
+    onOpenNotificationAccess: () -> Unit,
     onChangeWallpaper: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2103,6 +2122,11 @@ fun SettingsApp(
                         onClick = onOpenLauncherSwitch
                     )
                     SettingsRow(label = "ホーム設定を開く", onClick = onOpenHomeSettings)
+                    SettingsRow(
+                        label = "通知へのアクセス",
+                        value = if (notificationAccess) "許可済み" else "未許可",
+                        onClick = onOpenNotificationAccess
+                    )
                 }
             }
             item {
@@ -2381,6 +2405,11 @@ fun ControlCenter(onDismiss: () -> Unit) {
             }
 
             Spacer(Modifier.height(18.dp))
+            val nowPlaying = remember { MediaInfo.current(context) }
+            if (nowPlaying != null) {
+                NowPlayingCard(nowPlaying = nowPlaying)
+                Spacer(Modifier.height(12.dp))
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -2530,6 +2559,168 @@ fun LauncherSwitchScreen(
                     color = Color.White.copy(alpha = 0.5f)
                 )
                 Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun NotificationCenterScreen(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(LauncherNotificationService.isEnabled(context)) }
+    val items = LauncherNotificationService.items
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xE60B0D10))
+            .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .pointerInput(Unit) { detectTapGestures(onTap = { }) }
+        ) {
+            Spacer(Modifier.height(44.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("通知", fontSize = 26.sp, color = Color.White, modifier = Modifier.weight(1f))
+                if (enabled && items.isNotEmpty()) {
+                    TextButton(onClick = { LauncherNotificationService.dismissAll() }) {
+                        Text("すべて消去", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+            }
+            Spacer(Modifier.height(10.dp))
+
+            if (!enabled) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+                        .padding(14.dp)
+                ) {
+                    Text("通知の読み取りが許可されていません", fontSize = 14.sp, color = Color.White)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "通知へのアクセスを許可すると、ここに通知が並び、再生中の曲も表示できます。",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                    TextButton(onClick = {
+                        LauncherNotificationService.openSettings(context)
+                        enabled = LauncherNotificationService.isEnabled(context)
+                    }) {
+                        Text("許可する", color = Color(0xFF7FA6D8))
+                    }
+                }
+            } else if (items.isEmpty()) {
+                Text(
+                    "通知はありません",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.5f)
+                )
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(items.size) { i ->
+                        val n = items[i]
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.11f))
+                                .border(
+                                    1.dp,
+                                    Color.White.copy(alpha = 0.14f),
+                                    RoundedCornerShape(16.dp)
+                                )
+                                .padding(12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    n.appLabel,
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (n.clearable) {
+                                    Text(
+                                        "×",
+                                        fontSize = 16.sp,
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.clickable {
+                                            LauncherNotificationService.dismiss(n.key)
+                                        }
+                                    )
+                                }
+                            }
+                            if (n.title.isNotBlank()) {
+                                Text(n.title, fontSize = 14.sp, color = Color.White)
+                            }
+                            if (n.text.isNotBlank()) {
+                                Text(
+                                    n.text,
+                                    fontSize = 12.sp,
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NowPlayingCard(nowPlaying: NowPlaying) {
+    val context = LocalContext.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.12f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            .padding(14.dp)
+    ) {
+        Text(
+            nowPlaying.appLabel + (if (nowPlaying.isPlaying) " · 再生中" else " · 一時停止"),
+            fontSize = 11.sp,
+            color = Color.White.copy(alpha = 0.55f)
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            nowPlaying.title,
+            fontSize = 16.sp,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (nowPlaying.artist.isNotBlank()) {
+            Text(
+                nowPlaying.artist,
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { SystemControl.previous(context) }) {
+                Text("前の曲", color = Color.White, fontSize = 13.sp)
+            }
+            TextButton(onClick = { SystemControl.playPause(context) }) {
+                Text("再生 / 停止", color = Color.White, fontSize = 13.sp)
+            }
+            TextButton(onClick = { SystemControl.next(context) }) {
+                Text("次の曲", color = Color.White, fontSize = 13.sp)
             }
         }
     }
