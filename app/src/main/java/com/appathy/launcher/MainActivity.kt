@@ -877,12 +877,6 @@ fun HomeScreen(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .pointerInput(editMode) {
-                    detectTapGestures(
-                        onTap = { if (editMode) onExitEdit() },
-                        onLongPress = { if (!editMode) homeMenu = true }
-                    )
-                }
         ) {
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                 if (page >= pages) {
@@ -922,6 +916,8 @@ fun HomeScreen(
                     onMoveToLibrary = onMoveToLibrary,
                     editMode = editMode,
                     onEnterEdit = onEnterEdit,
+                    onExitEdit = onExitEdit,
+                    onEmptyLongPress = { homeMenu = true },
                     onOpenSettingsApp = onOpenSettingsApp,
                     onScrollToPage = { target ->
                         pagerScope.launch { pagerState.animateScrollToPage(target) }
@@ -1095,6 +1091,8 @@ fun WorkspacePage(
     onMoveToLibrary: (String) -> Unit,
     editMode: Boolean,
     onEnterEdit: () -> Unit,
+    onExitEdit: () -> Unit,
+    onEmptyLongPress: () -> Unit,
     onOpenSettingsApp: () -> Unit,
     onScrollToPage: (Int) -> Unit,
     resolveKey: (String) -> AppEntry?
@@ -1121,6 +1119,17 @@ fun WorkspacePage(
                 repeatMode = RepeatMode.Reverse
             ),
             label = "wiggleAngle"
+        )
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(editMode) {
+                    detectTapGestures(
+                        onTap = { if (editMode) onExitEdit() },
+                        onLongPress = { if (!editMode) onEmptyLongPress() }
+                    )
+                }
         )
 
         Column(Modifier.fillMaxSize()) {
