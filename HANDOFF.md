@@ -211,3 +211,13 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 情報: アプリ数、バージョン（PackageManager から取得）
 - 旧 SettingsDialog / SettingRow は削除し、ホーム長押しメニューの「設定」もこの画面を開く
 - BackHandler は4系統: 検索 → 編集モード → フォルダ → 設定アプリ
+
+## v2.3 実装済み（オントロジーの「着手可能」を6件）
+- アプリ起動アニメーション: アイコンの位置から拡大して開く
+  - セルの Column に onGloballyPositioned を付けて boundsInWindow を記録し、タップ時に LaunchSource.rect へ格納
+  - launchApp() が ActivityOptions.makeScaleUpAnimation(rootView, rect...) を作って startActivity に渡す。rect は使用後 null に戻す（古い位置から開かないように）
+- ShortcutManager 対応（iOS の Quick Action 相当）: アイコン長押しメニューの先頭に、そのアプリのショートカットを最大4件表示。LauncherApps.getShortcuts は既定ランチャーでないと SecurityException になるため runCatching で握りつぶし、取れなければ何も出さない
+- Spotlight に Web 検索を追加: 入力があるとき先頭に「「〜」をWebで検索」行。ACTION_WEB_SEARCH、失敗時は Google の URL にフォールバック
+- ウィジェットのサイズプリセット: 編集ダイアログに 小2×2 / 中2×列数 / 大4×列数 を追加（iOS の Small / Medium / Large 相当）
+- フォルダ展開を spring アニメーションに変更（DampingRatioMediumBouncy）
+- アイコンに 6dp の落ち影を追加（clip = false で形状に沿わせる）

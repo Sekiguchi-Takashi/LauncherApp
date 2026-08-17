@@ -22,9 +22,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.slideInVertically
@@ -84,13 +86,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -173,6 +179,7 @@ fun LauncherRoot(
     awm: AppWidgetManager
 ) {
     val context = LocalContext.current
+    val rootView = LocalView.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     var searchOpen by remember { mutableStateOf(false) }
     var editMode by remember { mutableStateOf(false) }
@@ -355,7 +362,7 @@ fun LauncherRoot(
             host = host,
             awm = awm,
             onOpenSearch = { searchOpen = true },
-            onLaunch = { launchApp(context, it) },
+            onLaunch = { launchApp(context, it, rootView) },
             onRemoveItem = { item ->
                 saveHome(homeItems - item)
                 if (item.packageName == FOLDER_PKG) {
@@ -413,10 +420,14 @@ fun LauncherRoot(
             SpotlightSearch(
                 apps = apps,
                 onLaunch = {
-                    launchApp(context, it)
+                    launchApp(context, it, rootView)
                     searchOpen = false
                 },
                 onAppInfo = { pkg -> openAppInfo(context, pkg) },
+                onWebSearch = { q ->
+                    searchOpen = false
+                    webSearch(context, q)
+                },
                 onDismiss = { searchOpen = false }
             )
         }
@@ -523,6 +534,16 @@ fun LauncherRoot(
                     ) else it
                 })
             },
+            onPreset = { rs, cs ->
+                saveWidgets(widgets.map {
+                    if (it == editing) it.copy(
+                        rowSpan = rs.coerceIn(1, rows),
+                        colSpan = cs.coerceIn(1, cols),
+                        row = it.row.coerceIn(0, (rows - rs).coerceAtLeast(0)),
+                        col = it.col.coerceIn(0, (cols - cs).coerceAtLeast(0))
+                    ) else it
+                })
+            },
             onResize = { drs, dcs ->
                 saveWidgets(widgets.map {
                     if (it == editing) it.copy(
@@ -537,12 +558,64 @@ fun LauncherRoot(
 }
 }
 
-fun launchApp(context: Context, app: AppEntry) {
+object LaunchSource {
+    var rect: android.graphics.Rect? = null
+}
+
+fun launchApp(context: Context, app: AppEntry, sourceView: android.view.View? = null) {
     val intent = Intent(Intent.ACTION_MAIN)
         .addCategory(Intent.CATEGORY_LAUNCHER)
         .setClassName(app.packageName, app.activityName)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-    runCatching { context.startActivity(intent) }
+    val rect = LaunchSource.rect
+    LaunchSource.rect = null
+    val options = if (sourceView != null && rect != null) {
+        runCatching {
+            android.app.ActivityOptions.makeScaleUpAnimation(
+                sourceView, rect.left, rect.top, rect.width(), rect.height()
+            ).toBundle()
+        }.getOrNull()
+    } else null
+    runCatching { context.startActivity(intent, options) }
+}
+
+fun launchShortcut(context: Context, packageName: String, shortcutId: String) {
+    runCatching {
+        val launcherApps = context.getSystemService(android.content.pm.LauncherApps::class.java)
+        launcherApps.startShortcut(
+            packageName, shortcutId, null, null, android.os.Process.myUserHandle()
+        )
+    }
+}
+
+fun shortcutsFor(context: Context, packageName: String): List<Pair<String, String>> {
+    return runCatching {
+        val launcherApps = context.getSystemService(android.content.pm.LauncherApps::class.java)
+        val query = android.content.pm.LauncherApps.ShortcutQuery()
+            .setPackage(packageName)
+            .setQueryFlags(
+                android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                    android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                    android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+            )
+        launcherApps.getShortcuts(query, android.os.Process.myUserHandle())
+            .orEmpty()
+            .take(4)
+            .map { it.id to (it.shortLabel ?: it.longLabel ?: it.id).toString() }
+    }.getOrDefault(emptyList())
+}
+
+fun webSearch(context: Context, query: String) {
+    val intent = Intent(Intent.ACTION_WEB_SEARCH)
+        .putExtra(android.app.SearchManager.QUERY, query)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(intent) }.isFailure) {
+        val fallback = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://www.google.com/search?q=" + Uri.encode(query))
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(fallback) }
+    }
 }
 
 fun openAppInfo(context: Context, packageName: String) {
@@ -859,6 +932,7 @@ fun WorkspacePage(
             .padding(horizontal = 8.dp)
     ) {
         val density = LocalDensity.current
+        val contextForMenu = LocalContext.current
         val cellW = constraints.maxWidth.toFloat() / cols
         val cellH = constraints.maxHeight.toFloat() / rows
         var dragItem by remember { mutableStateOf<HomeItem?>(null) }
@@ -901,10 +975,20 @@ fun WorkspacePage(
                                 (app != null || folder != null || isSettings)
                             if (item != null && visible) {
                                 val phase = if ((r + c) % 2 == 0) 1f else -1f
+                                var iconBounds by remember(item) {
+                                    mutableStateOf<android.graphics.Rect?>(null)
+                                }
                                 Box {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
+                                        .onGloballyPositioned { coords ->
+                                            val b = coords.boundsInWindow()
+                                            iconBounds = android.graphics.Rect(
+                                                b.left.toInt(), b.top.toInt(),
+                                                b.right.toInt(), b.bottom.toInt()
+                                            )
+                                        }
                                         .graphicsLayer {
                                             rotationZ = if (editMode) wiggleAngle * phase else 0f
                                         }
@@ -914,6 +998,7 @@ fun WorkspacePage(
                                             } else if (folder != null) {
                                                 onOpenFolder(folder.id)
                                             } else if (app != null) {
+                                                LaunchSource.rect = iconBounds
                                                 onLaunch(app)
                                             }
                                         }
@@ -1087,6 +1172,22 @@ fun WorkspacePage(
                                             }
                                         )
                                     } else if (app != null) {
+                                        val shortcuts = remember(app.packageName, menuFor) {
+                                            if (menuFor == item) {
+                                                shortcutsFor(contextForMenu, app.packageName)
+                                            } else emptyList()
+                                        }
+                                        shortcuts.forEach { entry ->
+                                            DropdownMenuItem(
+                                                text = { Text(entry.second) },
+                                                onClick = {
+                                                    menuFor = null
+                                                    launchShortcut(
+                                                        contextForMenu, app.packageName, entry.first
+                                                    )
+                                                }
+                                            )
+                                        }
                                         DropdownMenuItem(
                                             text = { Text("App Libraryへ移動") },
                                             onClick = {
@@ -1249,6 +1350,7 @@ fun WidgetEditDialog(
     cols: Int,
     onMove: (Int, Int) -> Unit,
     onResize: (Int, Int) -> Unit,
+    onPreset: (Int, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -1273,6 +1375,13 @@ fun WidgetEditDialog(
                     TextButton(onClick = { onResize(1, 0) }) { Text("高く") }
                     TextButton(onClick = { onResize(0, -1) }) { Text("狭く") }
                     TextButton(onClick = { onResize(0, 1) }) { Text("広く") }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("プリセット")
+                Row {
+                    TextButton(onClick = { onPreset(2, 2) }) { Text("小 2×2") }
+                    TextButton(onClick = { onPreset(2, cols) }) { Text("中 2×" + cols) }
+                    TextButton(onClick = { onPreset(4, cols) }) { Text("大 4×" + cols) }
                 }
             }
         }
@@ -1339,7 +1448,13 @@ fun FolderOverlay(
 
     val scale = remember { Animatable(0.85f) }
     LaunchedEffect(folder.id) {
-        scale.animateTo(1f, animationSpec = tween(durationMillis = 180))
+        scale.animateTo(
+            1f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
     }
 
     Box(
@@ -1548,6 +1663,7 @@ fun SpotlightSearch(
     apps: List<AppEntry>,
     onLaunch: (AppEntry) -> Unit,
     onAppInfo: (String) -> Unit,
+    onWebSearch: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
@@ -1587,6 +1703,33 @@ fun SpotlightSearch(
         )
         Spacer(Modifier.height(12.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (query.isNotBlank()) {
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onWebSearch(query) }
+                            .padding(vertical = 10.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.14f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("W", fontSize = 16.sp, color = Color.White)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "「" + query + "」をWebで検索",
+                            fontSize = 15.sp,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
             items(results.size) { i ->
                 val app = results[i]
                 var menu by remember(app.packageName) { mutableStateOf(false) }
@@ -1639,7 +1782,13 @@ fun AppIcon(
         Image(
             bitmap = current,
             contentDescription = app.label,
-            modifier = modifier.size(size)
+            modifier = modifier
+                .size(size)
+                .shadow(
+                    elevation = 6.dp,
+                    shape = RoundedCornerShape(size * 0.235f),
+                    clip = false
+                )
         )
     } else {
         Box(
