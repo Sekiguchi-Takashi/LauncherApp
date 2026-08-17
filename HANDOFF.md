@@ -356,3 +356,8 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - IconCache.load に overrideUri を追加。上書きがある場合はキー末尾に @custom を付けて別枠でキャッシュする
   - 表示名は displayLabel(app) 経由。ホーム・Dock・検索結果に反映される
 - バックアップ対象キーに label_overrides / icon_overrides / notif_badge を追加
+
+## v3.3.1（deploy.sh の規約対応）
+- deploy.sh の第2引数に `notag` を渡したとき、push のみで終了しタグを発行しないようにした
+  - 使い分け: `bash ~/LauncherApp/deploy.sh "メッセージ"` でタグ発行あり、`bash ~/LauncherApp/deploy.sh "メッセージ" notag` で push のみ
+- 次タグの算出は従来どおり `git fetch --tags --force` → `git tag --list 'v*' | sort -V | tail -1`。GitHub API は使わない
