@@ -318,3 +318,12 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 根拠: このアプリで長押しが確実に動いている箇所（App Library / Spotlight 検索 / フォルダ展開）はすべて combinedClickable を使っており、ホーム画面のセルだけが独自実装だった
 - WorkspacePage に @OptIn(ExperimentalFoundationApi::class) を付与、未使用になった detectDragGesturesAfterLongPress の import を削除
 - 操作の流れ: アイコンを長押し → 全体が揺れる → そのままでも指を離してからでも、ドラッグで移動 → 「完了」ボタンで終了
+
+## v3.1 実装済み（ウィジェットのドラッグ移動とリサイズ）
+- 編集モードのときだけ、ウィジェットの上に透明なドラッグ層を重ねる
+  - 通常時はウィジェット本体がタッチを受け取るので操作性はそのまま。編集モードでは上の層が受け取るため、掴んで動かせる
+  - ドラッグ中は offset を即時反映して指に追従。離した時点で最寄りのセルへ吸着（col/row を四捨五入し、はみ出さないよう clamp）
+- 右下に丸いリサイズハンドルを表示。斜めにドラッグすると colSpan / rowSpan がセル単位で変わる
+- 編集モード中はウィジェットもアイコンと一緒に揺れる（振れ幅はアイコンの 0.4 倍に抑えた）
+- WorkspacePage / HomeScreen に onMoveWidget, onResizeWidget を追加。保存は既存の saveWidgets 経由
+- 従来の「⋮」メニュー（位置とサイズを編集 / ページ移動 / 削除）はそのまま残している

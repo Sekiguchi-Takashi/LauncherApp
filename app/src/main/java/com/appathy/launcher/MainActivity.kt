@@ -472,6 +472,19 @@ fun LauncherRoot(
                     saveWidgets(widgets.map { if (it == w) it.copy(page = target) else it })
                 }
             },
+            onMoveWidget = { w, r, c ->
+                saveWidgets(widgets.map { if (it == w) it.copy(row = r, col = c) else it })
+            },
+            onResizeWidget = { w, rs, cs ->
+                saveWidgets(
+                    widgets.map {
+                        if (it == w) it.copy(
+                            rowSpan = rs.coerceIn(1, rows - it.row),
+                            colSpan = cs.coerceIn(1, cols - it.col)
+                        ) else it
+                    }
+                )
+            },
         )
         }
         AnimatedVisibility(
@@ -822,6 +835,8 @@ fun HomeScreen(
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
+    onMoveWidget: (WidgetItem, Int, Int) -> Unit,
+    onResizeWidget: (WidgetItem, Int, Int) -> Unit,
     folders: List<FolderEntry>,
     onOpenFolder: (String) -> Unit
 ) {
@@ -900,6 +915,8 @@ fun HomeScreen(
                     onEditWidget = onEditWidget,
                     onDeleteWidget = onDeleteWidget,
                     onWidgetToPage = onWidgetToPage,
+                    onMoveWidget = onMoveWidget,
+                    onResizeWidget = onResizeWidget,
                     folders = folders,
                     onOpenFolder = onOpenFolder,
                     onMoveToLibrary = onMoveToLibrary,
@@ -1039,6 +1056,8 @@ fun WorkspacePage(
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
+    onMoveWidget: (WidgetItem, Int, Int) -> Unit,
+    onResizeWidget: (WidgetItem, Int, Int) -> Unit,
     folders: List<FolderEntry>,
     onOpenFolder: (String) -> Unit,
     onMoveToLibrary: (String) -> Unit,
@@ -1336,23 +1355,84 @@ fun WorkspacePage(
                 val info = awm.getAppWidgetInfo(w.widgetId)
                 if (info != null) {
                     var wMenu by remember { mutableStateOf(false) }
+                    var wDrag by remember(w) { mutableStateOf(Offset.Zero) }
+                    var wResize by remember(w) { mutableStateOf(Offset.Zero) }
                     Box(
                         Modifier
                             .offset {
                                 IntOffset(
-                                    (w.col * cellW).roundToInt(),
-                                    (w.row * cellH).roundToInt()
+                                    (w.col * cellW + wDrag.x).roundToInt(),
+                                    (w.row * cellH + wDrag.y).roundToInt()
                                 )
                             }
                             .size(
-                                width = with(density) { (cellW * w.colSpan).toDp() },
-                                height = with(density) { (cellH * w.rowSpan).toDp() }
+                                width = with(density) {
+                                    (cellW * w.colSpan + wResize.x).coerceAtLeast(cellW).toDp()
+                                },
+                                height = with(density) {
+                                    (cellH * w.rowSpan + wResize.y).coerceAtLeast(cellH).toDp()
+                                }
                             )
+                            .graphicsLayer {
+                                rotationZ = if (editMode) wiggleAngle * 0.4f else 0f
+                            }
                     ) {
                         AndroidView(
                             factory = { ctx -> host.createView(ctx, w.widgetId, info) },
                             modifier = Modifier.fillMaxSize()
                         )
+                        if (editMode) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(Color.White.copy(alpha = 0.10f))
+                                    .pointerInput(w) {
+                                        detectDragGestures(
+                                            onDrag = { change, amount ->
+                                                change.consume()
+                                                wDrag += amount
+                                            },
+                                            onDragEnd = {
+                                                val nc = (w.col + wDrag.x / cellW)
+                                                    .roundToInt()
+                                                    .coerceIn(0, cols - w.colSpan)
+                                                val nr = (w.row + wDrag.y / cellH)
+                                                    .roundToInt()
+                                                    .coerceIn(0, rows - w.rowSpan)
+                                                wDrag = Offset.Zero
+                                                onMoveWidget(w, nr, nc)
+                                            },
+                                            onDragCancel = { wDrag = Offset.Zero }
+                                        )
+                                    }
+                            )
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xCCFFFFFF))
+                                    .pointerInput(w) {
+                                        detectDragGestures(
+                                            onDrag = { change, amount ->
+                                                change.consume()
+                                                wResize += amount
+                                            },
+                                            onDragEnd = {
+                                                val ncs = (w.colSpan + wResize.x / cellW)
+                                                    .roundToInt()
+                                                    .coerceIn(1, cols - w.col)
+                                                val nrs = (w.rowSpan + wResize.y / cellH)
+                                                    .roundToInt()
+                                                    .coerceIn(1, rows - w.row)
+                                                wResize = Offset.Zero
+                                                onResizeWidget(w, nrs, ncs)
+                                            },
+                                            onDragCancel = { wResize = Offset.Zero }
+                                        )
+                                    }
+                            )
+                        }
                         Text(
                             "⋮",
                             color = Color.White,
