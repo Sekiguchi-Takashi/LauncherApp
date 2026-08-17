@@ -221,3 +221,13 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - ウィジェットのサイズプリセット: 編集ダイアログに 小2×2 / 中2×列数 / 大4×列数 を追加（iOS の Small / Medium / Large 相当）
 - フォルダ展開を spring アニメーションに変更（DampingRatioMediumBouncy）
 - アイコンに 6dp の落ち影を追加（clip = false で形状に沿わせる）
+
+## v2.4 実装済み（設定 > アプリ一覧：非表示と削除）
+- HiddenApps（"hidden_apps" キー）を新設。libraryOnly（App Library のみに置く）とは別概念で、こちらは完全に隠す
+- 設定アプリ > ホーム画面 > 「アプリ一覧」から AppListScreen を開く。件数バッジに非表示数を表示
+- AppListScreen の機能
+  - アプリ名での絞り込み、「非表示だけを見る」トグル
+  - 各行に アイコン / 名前 / パッケージ名（非表示中は「非表示中」表示）と、非表示⇄表示 の切替、削除、情報 のボタン
+  - 削除は ACTION_DELETE でシステムのアンインストール確認へ遷移。完了後は PACKAGE_REMOVED を受けて一覧が更新される
+- 非表示にしたとき: ホームの配置から除去、フォルダの中身からも除去、Dock（お気に入り）からも除去。表示に戻すと autoPlace が空きセルへ再配置する
+- LauncherRoot は visibleApps（apps から hiddenApps を除いたもの）をホーム・検索・フォルダ・自動配置へ渡す。設定とアプリ一覧だけが全件の apps を受け取る

@@ -185,6 +185,8 @@ fun LauncherRoot(
     var editMode by remember { mutableStateOf(false) }
     var settingsAppOpen by remember { mutableStateOf(false) }
     var settingsTileHidden by remember { mutableStateOf(SettingsTile.hidden(context)) }
+    var hiddenApps by remember { mutableStateOf(HiddenApps.load(context)) }
+    var appListOpen by remember { mutableStateOf(false) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -315,13 +317,33 @@ fun LauncherRoot(
         }
     }
 
-    val favApps = favorites.mapNotNull { pkg -> apps.find { it.packageName == pkg } }
+    val visibleApps = apps.filter { appKey(it) !in hiddenApps }
+    val favApps = favorites.mapNotNull { pkg -> visibleApps.find { it.packageName == pkg } }
     val dockKeys = favApps.map { appKey(it) }.toSet()
 
-    LaunchedEffect(apps, libraryOnly, favorites, rows, cols, settingsTileHidden) {
-        if (apps.isNotEmpty()) {
+    fun hideApp(key: String) {
+        hiddenApps = hiddenApps + key
+        HiddenApps.save(context, hiddenApps)
+        saveHome(homeItems.filter { it.packageName == FOLDER_PKG ||
+            it.packageName == SETTINGS_PKG || appKey(it) != key })
+        val cleaned = folders.map { f -> f.copy(apps = f.apps.filter { it != key }) }
+        if (cleaned != folders) saveFolders(cleaned)
+        val pkg = key.substringBeforeLast('/')
+        if (favorites.contains(pkg)) {
+            favorites = favorites - pkg
+            Favorites.save(context, favorites)
+        }
+    }
+
+    fun unhideApp(key: String) {
+        hiddenApps = hiddenApps - key
+        HiddenApps.save(context, hiddenApps)
+    }
+
+    LaunchedEffect(visibleApps, libraryOnly, favorites, rows, cols, settingsTileHidden) {
+        if (visibleApps.isNotEmpty()) {
             var placed = autoPlace(
-                apps, homeItems, folders, widgets, libraryOnly, dockKeys, pages, rows, cols
+                visibleApps, homeItems, folders, widgets, libraryOnly, dockKeys, pages, rows, cols
             )
             if (!settingsTileHidden) {
                 placed = ensureSettingsTile(
@@ -345,7 +367,7 @@ fun LauncherRoot(
                 .then(if (folderOpen) Modifier.blur(20.dp) else Modifier)
         ) {
         HomeScreen(
-            apps = apps,
+            apps = visibleApps,
             homeItems = homeItems,
             widgets = widgets,
             favApps = favApps,
@@ -418,7 +440,7 @@ fun LauncherRoot(
             exit = slideOutVertically { -it }
         ) {
             SpotlightSearch(
-                apps = apps,
+                apps = visibleApps,
                 onLaunch = {
                     launchApp(context, it, rootView)
                     searchOpen = false
@@ -436,7 +458,7 @@ fun LauncherRoot(
         if (openFolder != null) {
             FolderOverlay(
                 folder = openFolder,
-                apps = apps,
+                apps = visibleApps,
                 onLaunch = {
                     launchApp(context, it)
                     openFolderId = null
@@ -470,6 +492,7 @@ fun LauncherRoot(
     BackHandler(enabled = editMode && !searchOpen) { editMode = false }
     BackHandler(enabled = folderOpen) { openFolderId = null }
     BackHandler(enabled = settingsAppOpen) { settingsAppOpen = false }
+    BackHandler(enabled = appListOpen) { appListOpen = false }
 
     if (settingsAppOpen) {
         SettingsApp(
@@ -479,6 +502,11 @@ fun LauncherRoot(
             iconStyle = iconStyle,
             libraryOnly = libraryOnly,
             settingsTileHidden = settingsTileHidden,
+            hiddenCount = hiddenApps.size,
+            onOpenAppList = {
+                settingsAppOpen = false
+                appListOpen = true
+            },
             apps = apps,
             isDefaultHomeNow = isDefaultHome(context),
             onPages = { pages = it; LauncherSettings.setPages(context, it) },
@@ -506,6 +534,18 @@ fun LauncherRoot(
                 }
             },
             onDismiss = { settingsAppOpen = false }
+        )
+    }
+
+    if (appListOpen) {
+        AppListScreen(
+            apps = apps,
+            hiddenApps = hiddenApps,
+            onHide = { hideApp(it) },
+            onUnhide = { unhideApp(it) },
+            onUninstall = { uninstallApp(context, it) },
+            onAppInfo = { openAppInfo(context, it) },
+            onDismiss = { appListOpen = false }
         )
     }
 
@@ -603,6 +643,12 @@ fun shortcutsFor(context: Context, packageName: String): List<Pair<String, Strin
             .take(4)
             .map { it.id to (it.shortLabel ?: it.longLabel ?: it.id).toString() }
     }.getOrDefault(emptyList())
+}
+
+fun uninstallApp(context: Context, packageName: String) {
+    val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:" + packageName))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 fun webSearch(context: Context, query: String) {
@@ -1903,6 +1949,8 @@ fun SettingsApp(
     iconStyle: IconStyle,
     libraryOnly: Set<String>,
     settingsTileHidden: Boolean,
+    hiddenCount: Int,
+    onOpenAppList: () -> Unit,
     apps: List<AppEntry>,
     isDefaultHomeNow: Boolean,
     onPages: (Int) -> Unit,
@@ -1970,6 +2018,11 @@ fun SettingsApp(
                         onDismiss()
                         onAddWidget()
                     })
+                    SettingsRow(
+                        label = "アプリ一覧",
+                        value = hiddenCount.toString() + " 件を非表示",
+                        onClick = onOpenAppList
+                    )
                     if (settingsTileHidden) {
                         SettingsRow(label = "設定アイコンをホームに戻す", onClick = onRestoreSettingsTile)
                     }
@@ -2008,6 +2061,127 @@ fun SettingsApp(
                 }
                 Spacer(Modifier.height(24.dp))
             }
+        }
+    }
+}
+
+@Composable
+fun AppListScreen(
+    apps: List<AppEntry>,
+    hiddenApps: Set<String>,
+    onHide: (String) -> Unit,
+    onUnhide: (String) -> Unit,
+    onUninstall: (String) -> Unit,
+    onAppInfo: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var showHiddenOnly by remember { mutableStateOf(false) }
+    val listed = apps
+        .filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
+        .filter { !showHiddenOnly || hiddenApps.contains(appKey(it)) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xF20B0D10))
+            .padding(horizontal = 16.dp)
+    ) {
+        Spacer(Modifier.height(44.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("アプリ一覧", fontSize = 26.sp, color = Color.White, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+        }
+        Text(
+            "全 " + apps.size + " 件 / 非表示 " + hiddenApps.size + " 件",
+            fontSize = 12.sp,
+            color = Color.White.copy(alpha = 0.55f)
+        )
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("アプリ名で絞り込み") },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color.White.copy(alpha = 0.5f),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                focusedPlaceholderColor = Color.Gray,
+                unfocusedPlaceholderColor = Color.Gray,
+                cursorColor = Color.White
+            )
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    if (showHiddenOnly) Color.White.copy(alpha = 0.18f)
+                    else Color.White.copy(alpha = 0.07f)
+                )
+                .clickable { showHiddenOnly = !showHiddenOnly }
+                .padding(horizontal = 12.dp, vertical = 7.dp)
+        ) {
+            Text(
+                if (showHiddenOnly) "非表示のみ表示中" else "非表示だけを見る",
+                fontSize = 13.sp,
+                color = Color.White
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(listed.size) { i ->
+                val app = listed[i]
+                val key = appKey(app)
+                val isHidden = hiddenApps.contains(key)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(10.dp)
+                ) {
+                    AppIcon(app = app, size = 38.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            app.label,
+                            fontSize = 14.sp,
+                            color = if (isHidden) Color.White.copy(alpha = 0.5f) else Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            if (isHidden) "非表示中" else app.packageName,
+                            fontSize = 10.sp,
+                            color = Color.White.copy(alpha = 0.45f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    TextButton(onClick = { if (isHidden) onUnhide(key) else onHide(key) }) {
+                        Text(
+                            if (isHidden) "表示" else "非表示",
+                            fontSize = 13.sp,
+                            color = if (isHidden) Color(0xFF5BD6A8) else Color.White
+                        )
+                    }
+                    TextButton(onClick = { onUninstall(app.packageName) }) {
+                        Text("削除", fontSize = 13.sp, color = Color(0xFFE2687A))
+                    }
+                    TextButton(onClick = { onAppInfo(app.packageName) }) {
+                        Text("情報", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 }

@@ -82,6 +82,20 @@ fun ensureSettingsTile(
     return items
 }
 
+object HiddenApps {
+    private const val PREF = "launcher_prefs"
+    private const val KEY = "hidden_apps"
+
+    fun load(context: Context): Set<String> =
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString(KEY, "")!!.split(";").filter { it.isNotBlank() }.toSet()
+
+    fun save(context: Context, keys: Set<String>) {
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .edit().putString(KEY, keys.joinToString(";")).apply()
+    }
+}
+
 object SettingsTile {
     private const val PREF = "launcher_prefs"
     private const val KEY = "settings_tile_hidden"
