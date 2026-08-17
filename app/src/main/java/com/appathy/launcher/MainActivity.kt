@@ -233,6 +233,7 @@ fun LauncherRoot(
     var controlOpen by remember { mutableStateOf(false) }
     var launcherSwitchOpen by remember { mutableStateOf(false) }
     var notificationsOpen by remember { mutableStateOf(false) }
+    var quickPanelOpen by remember { mutableStateOf(false) }
     var libraryOnly by remember { mutableStateOf(LibraryApps.load(context)) }
     var favorites by remember { mutableStateOf(Favorites.load(context)) }
     var homeItems by remember { mutableStateOf(Workspace.load(context)) }
@@ -429,9 +430,7 @@ fun LauncherRoot(
             onRestoreFromLibrary = { key -> saveLibrary(libraryOnly - key) },
             host = host,
             awm = awm,
-            onOpenSearch = { searchOpen = true },
-            onOpenControlCenter = { controlOpen = true },
-            onOpenNotifications = { notificationsOpen = true },
+            onOpenQuickPanel = { quickPanelOpen = true },
             onLaunch = { launchApp(context, it, rootView) },
             onRemoveItem = { item ->
                 saveHome(homeItems - item)
@@ -463,12 +462,6 @@ fun LauncherRoot(
             onToggleFavorite = { pkg -> toggleFavorite(pkg) },
             onOpenSettings = { settingsAppOpen = true },
             onOpenSettingsApp = { settingsAppOpen = true },
-            settingsTileHidden = settingsTileHidden,
-            onRestoreSettingsTile = {
-                settingsTileHidden = false
-                SettingsTile.setHidden(context, false)
-            },
-            onAddWidget = { showWidgetPicker = true },
             onEditWidget = { editWidgetId = it.widgetId },
             onDeleteWidget = { w ->
                 runCatching { host.deleteAppWidgetId(w.widgetId) }
@@ -544,6 +537,7 @@ fun LauncherRoot(
     BackHandler(enabled = controlOpen) { controlOpen = false }
     BackHandler(enabled = launcherSwitchOpen) { launcherSwitchOpen = false }
     BackHandler(enabled = notificationsOpen) { notificationsOpen = false }
+    BackHandler(enabled = quickPanelOpen) { quickPanelOpen = false }
 
     if (settingsAppOpen) {
         SettingsApp(
@@ -573,7 +567,10 @@ fun LauncherRoot(
                 SettingsTile.setHidden(context, false)
             },
             onEnterEdit = { editMode = true },
-            onAddWidget = { showWidgetPicker = true },
+            onOpenSearch = { searchOpen = true },
+            onOpenNotifications = { notificationsOpen = true },
+            onOpenControlCenter = { controlOpen = true },
+            onAddWidget = { quickPanelOpen = true },
             onRequestDefaultHome = { openLauncherChooser(context) },
             onOpenHomeSettings = { openLauncherChooser(context) },
             onOpenLauncherSwitch = {
@@ -603,6 +600,19 @@ fun LauncherRoot(
             onRequestDefault = { requestDefaultHome(context, homeRoleLauncher) },
             onOpenHomeSettings = { openLauncherChooser(context) },
             onDismiss = { launcherSwitchOpen = false }
+        )
+    }
+
+    if (quickPanelOpen) {
+        QuickPanel(
+            awm = awm,
+            onSelectWidget = { provider -> startAddWidget(provider) },
+            onOpenSearch = { searchOpen = true },
+            onOpenNotifications = { notificationsOpen = true },
+            onOpenControlCenter = { controlOpen = true },
+            onOpenSettingsApp = { settingsAppOpen = true },
+            onEnterEdit = { editMode = true },
+            onDismiss = { quickPanelOpen = false }
         )
     }
 
@@ -801,9 +811,7 @@ fun HomeScreen(
     onRestoreFromLibrary: (String) -> Unit,
     host: AppWidgetHost,
     awm: AppWidgetManager,
-    onOpenSearch: () -> Unit,
-    onOpenControlCenter: () -> Unit,
-    onOpenNotifications: () -> Unit,
+    onOpenQuickPanel: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onRemoveItem: (HomeItem) -> Unit,
     onMoveItem: (HomeItem, Int, Int) -> Unit,
@@ -812,9 +820,6 @@ fun HomeScreen(
     onToggleFavorite: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSettingsApp: () -> Unit,
-    settingsTileHidden: Boolean,
-    onRestoreSettingsTile: () -> Unit,
-    onAddWidget: () -> Unit,
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
@@ -828,27 +833,12 @@ fun HomeScreen(
     ) {
         isDefault = isDefaultHome(context)
     }
-    var homeMenu by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(pageCount = { totalPages })
     val pagerScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                var startX = 0f
-                detectVerticalDragGestures(
-                    onDragStart = { offset -> startX = offset.x }
-                ) { _, dragAmount ->
-                    if (dragAmount > 20) {
-                        when {
-                            startX > size.width * 0.66f -> onOpenControlCenter()
-                            startX < size.width * 0.33f -> onOpenNotifications()
-                            else -> onOpenSearch()
-                        }
-                    }
-                }
-            }
             .padding(top = 48.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -916,8 +906,6 @@ fun HomeScreen(
                     onMoveToLibrary = onMoveToLibrary,
                     editMode = editMode,
                     onEnterEdit = onEnterEdit,
-                    onExitEdit = onExitEdit,
-                    onEmptyLongPress = { homeMenu = true },
                     onOpenSettingsApp = onOpenSettingsApp,
                     onScrollToPage = { target ->
                         pagerScope.launch { pagerState.animateScrollToPage(target) }
@@ -931,77 +919,19 @@ fun HomeScreen(
                     }
                 )
             }
-            DropdownMenu(expanded = homeMenu, onDismissRequest = { homeMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text("ホーム画面を編集") },
-                    onClick = {
-                        homeMenu = false
-                        onEnterEdit()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("検索") },
-                    onClick = {
-                        homeMenu = false
-                        onOpenSearch()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("コントロール") },
-                    onClick = {
-                        homeMenu = false
-                        onOpenControlCenter()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("通知") },
-                    onClick = {
-                        homeMenu = false
-                        onOpenNotifications()
-                    }
-                )
-                if (!isDefault) {
-                    DropdownMenuItem(
-                        text = { Text("デフォルトのホームに設定") },
-                        onClick = {
-                            homeMenu = false
-                            requestDefaultHome(context, roleLauncher)
-                        }
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("ホーム設定を開く") },
-                    onClick = {
-                        homeMenu = false
-                        openLauncherChooser(context)
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("ウィジェットを追加") },
-                    onClick = {
-                        homeMenu = false
-                        onAddWidget()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("設定") },
-                    onClick = {
-                        homeMenu = false
-                        onOpenSettings()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("壁紙を変更") },
-                    onClick = {
-                        homeMenu = false
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_SET_WALLPAPER)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
-                )
+        }
+
+        if (editMode) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.22f))
+                    .clickable { onExitEdit() }
+                    .padding(horizontal = 18.dp, vertical = 6.dp)
+            ) {
+                Text("完了", fontSize = 13.sp, color = Color.White)
             }
         }
 
@@ -1064,6 +994,29 @@ fun HomeScreen(
             }
         }
         }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(34.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount < -12) onOpenQuickPanel()
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { onOpenQuickPanel() })
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .width(120.dp)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.White.copy(alpha = 0.45f))
+            )
+        }
     }
 }
 
@@ -1091,8 +1044,6 @@ fun WorkspacePage(
     onMoveToLibrary: (String) -> Unit,
     editMode: Boolean,
     onEnterEdit: () -> Unit,
-    onExitEdit: () -> Unit,
-    onEmptyLongPress: () -> Unit,
     onOpenSettingsApp: () -> Unit,
     onScrollToPage: (Int) -> Unit,
     resolveKey: (String) -> AppEntry?
@@ -1119,17 +1070,6 @@ fun WorkspacePage(
                 repeatMode = RepeatMode.Reverse
             ),
             label = "wiggleAngle"
-        )
-
-        Box(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(editMode) {
-                    detectTapGestures(
-                        onTap = { if (editMode) onExitEdit() },
-                        onLongPress = { if (!editMode) onEmptyLongPress() }
-                    )
-                }
         )
 
         Column(Modifier.fillMaxSize()) {
@@ -2128,6 +2068,9 @@ fun SettingsApp(
     onRestoreFromLibrary: (String) -> Unit,
     onRestoreSettingsTile: () -> Unit,
     onEnterEdit: () -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    onOpenControlCenter: () -> Unit,
     onAddWidget: () -> Unit,
     onRequestDefaultHome: () -> Unit,
     onOpenHomeSettings: () -> Unit,
@@ -2187,6 +2130,18 @@ fun SettingsApp(
                     SettingsRow(label = "ホーム画面を編集", onClick = {
                         onDismiss()
                         onEnterEdit()
+                    })
+                    SettingsRow(label = "検索を開く", onClick = {
+                        onDismiss()
+                        onOpenSearch()
+                    })
+                    SettingsRow(label = "通知を開く", onClick = {
+                        onDismiss()
+                        onOpenNotifications()
+                    })
+                    SettingsRow(label = "コントロールを開く", onClick = {
+                        onDismiss()
+                        onOpenControlCenter()
                     })
                     SettingsRow(label = "ウィジェットを追加", onClick = {
                         onDismiss()
@@ -2818,5 +2773,135 @@ fun NowPlayingCard(nowPlaying: NowPlaying) {
                 Text("次の曲", color = Color.White, fontSize = 13.sp)
             }
         }
+    }
+}
+
+@Composable
+fun QuickPanel(
+    awm: AppWidgetManager,
+    onSelectWidget: (AppWidgetProviderInfo) -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    onOpenControlCenter: () -> Unit,
+    onOpenSettingsApp: () -> Unit,
+    onEnterEdit: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var showWidgets by remember { mutableStateOf(false) }
+    val providers = remember {
+        awm.installedProviders.sortedBy { it.loadLabel(context.packageManager).lowercase() }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xE60B0D10))
+            .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .pointerInput(Unit) { detectTapGestures(onTap = { }) }
+        ) {
+            Spacer(Modifier.height(40.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (showWidgets) "ウィジェットを選ぶ" else "メニュー",
+                    fontSize = 24.sp,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onDismiss) { Text("閉じる", color = Color.White) }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            if (!showWidgets) {
+                QuickAction("ウィジェットを追加", "ホームに置くウィジェットを選ぶ") {
+                    showWidgets = true
+                }
+                QuickAction("ホーム画面を編集", "アイコンを揺らして並べ替える") {
+                    onDismiss()
+                    onEnterEdit()
+                }
+                QuickAction("検索", "アプリと Web を検索") {
+                    onDismiss()
+                    onOpenSearch()
+                }
+                QuickAction("通知", "通知を確認する") {
+                    onDismiss()
+                    onOpenNotifications()
+                }
+                QuickAction("コントロール", "音量・明るさ・再生操作") {
+                    onDismiss()
+                    onOpenControlCenter()
+                }
+                QuickAction("設定", "このランチャーの設定") {
+                    onDismiss()
+                    onOpenSettingsApp()
+                }
+                QuickAction("壁紙を変更", "システムの壁紙設定を開く") {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_SET_WALLPAPER)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }
+            } else {
+                TextButton(onClick = { showWidgets = false }) {
+                    Text("← メニューに戻る", color = Color.White)
+                }
+                Spacer(Modifier.height(4.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(providers.size) { i ->
+                        val provider = providers[i]
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.09f))
+                                .clickable {
+                                    onDismiss()
+                                    onSelectWidget(provider)
+                                }
+                                .padding(14.dp)
+                        ) {
+                            Text(
+                                provider.loadLabel(context.packageManager),
+                                fontSize = 14.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickAction(title: String, sub: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp, color = Color.White)
+            Text(sub, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f))
+        }
+        Text("›", fontSize = 18.sp, color = Color.White.copy(alpha = 0.5f))
     }
 }
