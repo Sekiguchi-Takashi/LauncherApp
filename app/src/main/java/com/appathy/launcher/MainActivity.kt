@@ -1163,7 +1163,10 @@ fun WorkspacePage(
                                             )
                                         }
                                         .graphicsLayer {
-                                            rotationZ = if (editMode) wiggleAngle * phase else 0f
+                                            rotationZ =
+                                                if (editMode || dragItem != null) {
+                                                    wiggleAngle * phase
+                                                } else 0f
                                         }
                                         .clickable(enabled = !editMode) {
                                             if (isSettings) {
@@ -1194,9 +1197,13 @@ fun WorkspacePage(
                                                     onDragEnd = {
                                                         val moving = dragItem
                                                         if (moving != null) {
+                                                            val dist =
+                                                                (dragPos - dragStart).getDistance()
                                                             val w = cellW * cols
                                                             val edge = w * 0.08f
-                                                            if (dragPos.x < edge && pageIndex > 0) {
+                                                            if (dist < cellW * 0.15f) {
+                                                                menuFor = moving
+                                                            } else if (dragPos.x < edge && pageIndex > 0) {
                                                                 onMoveToPage(moving, -1)
                                                                 onScrollToPage(pageIndex - 1)
                                                             } else if (
@@ -1257,6 +1264,7 @@ fun WorkspacePage(
                                                                 .coerceIn(0, rows - 1)
                                                             onMoveItem(moving, tr, tc)
                                                         }
+                                                        if (dist >= cellW * 0.2f) onEnterEdit()
                                                     }
                                                     dragItem = null
                                                 },
