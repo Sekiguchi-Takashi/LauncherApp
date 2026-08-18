@@ -1205,6 +1205,9 @@ fun WorkspacePage(
         var dragItem by remember { mutableStateOf<HomeItem?>(null) }
         var dragPos by remember { mutableStateOf(Offset.Zero) }
         var dragStart by remember { mutableStateOf(Offset.Zero) }
+        LaunchedEffect(editMode) {
+            if (!editMode) dragItem = null
+        }
         var menuFor by remember { mutableStateOf<HomeItem?>(null) }
         val wiggle = rememberInfiniteTransition(label = "wiggle")
         val wiggleAngle by wiggle.animateFloat(
@@ -1275,9 +1278,10 @@ fun WorkspacePage(
                                                             dragStart = cellOrigin + offset
                                                             dragPos = dragStart
                                                         },
-                                                        onDrag = { change, amount ->
+                                                        onDrag = { change, _ ->
                                                             change.consume()
-                                                            dragPos += amount
+                                                            dragPos =
+                                                                cellOrigin + change.position
                                                         },
                                                         onDragEnd = {
                                                             val moving = dragItem
