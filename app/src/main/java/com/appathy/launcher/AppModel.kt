@@ -488,13 +488,24 @@ fun dropOnto(
         )
     }
 
+    return DropResult(placeItem(items, source, source.page, row, col), folders)
+}
+
+fun makeFolder(
+    items: List<HomeItem>,
+    folders: List<FolderEntry>,
+    source: HomeItem
+): DropResult {
+    if (source.packageName == FOLDER_PKG || source.packageName == SETTINGS_PKG) {
+        return DropResult(items, folders)
+    }
     val folder = FolderEntry(
         id = Folders.newId(),
         name = "フォルダ",
-        apps = listOf(appKey(target), appKey(source))
+        apps = listOf(appKey(source))
     )
     return DropResult(
-        (items - target - source) + HomeItem(source.page, row, col, FOLDER_PKG, folder.id),
+        (items - source) + HomeItem(source.page, source.row, source.col, FOLDER_PKG, folder.id),
         folders + folder
     )
 }

@@ -95,6 +95,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -514,6 +515,7 @@ fun LauncherRoot(
                 iconTarget = app
                 pickIconLauncher.launch(arrayOf("image/*"))
             },
+            onMakeFolder = { item -> applyDrop(makeFolder(homeItems, folders, item)) },
             onEditWidget = { editWidgetId = it.widgetId },
             onDeleteWidget = { w ->
                 runCatching { host.deleteAppWidgetId(w.widgetId) }
@@ -962,6 +964,7 @@ fun HomeScreen(
     onOpenSettingsApp: () -> Unit,
     onRenameApp: (AppEntry) -> Unit,
     onChangeIcon: (AppEntry) -> Unit,
+    onMakeFolder: (HomeItem) -> Unit,
     onEditWidget: (WidgetItem) -> Unit,
     onDeleteWidget: (WidgetItem) -> Unit,
     onWidgetToPage: (WidgetItem, Int) -> Unit,
@@ -1033,6 +1036,7 @@ fun HomeScreen(
                     onOpenSettingsApp = onOpenSettingsApp,
                     onRenameApp = onRenameApp,
                     onChangeIcon = onChangeIcon,
+                    onMakeFolder = onMakeFolder,
                     onScrollToPage = { target ->
                         pagerScope.launch { pagerState.animateScrollToPage(target) }
                     },
@@ -1183,13 +1187,16 @@ fun WorkspacePage(
     onOpenSettingsApp: () -> Unit,
     onRenameApp: (AppEntry) -> Unit,
     onChangeIcon: (AppEntry) -> Unit,
+    onMakeFolder: (HomeItem) -> Unit,
     onScrollToPage: (Int) -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
+    var gridOrigin by remember { mutableStateOf(Offset.Zero) }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp)
+            .onGloballyPositioned { gridOrigin = it.positionInWindow() }
     ) {
         val density = LocalDensity.current
         val contextForMenu = LocalContext.current
@@ -1238,6 +1245,7 @@ fun WorkspacePage(
                                 var iconBounds by remember(item) {
                                     mutableStateOf<android.graphics.Rect?>(null)
                                 }
+                                var cellOrigin by remember(item) { mutableStateOf(Offset.Zero) }
                                 Box {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -1248,6 +1256,7 @@ fun WorkspacePage(
                                                 b.left.toInt(), b.top.toInt(),
                                                 b.right.toInt(), b.bottom.toInt()
                                             )
+                                            cellOrigin = coords.positionInWindow() - gridOrigin
                                         }
                                         .graphicsLayer {
                                             rotationZ =
@@ -1263,10 +1272,7 @@ fun WorkspacePage(
                                                     detectDragGestures(
                                                         onDragStart = { offset ->
                                                             dragItem = item
-                                                            dragStart = Offset(
-                                                                c * cellW + offset.x,
-                                                                r * cellH + offset.y
-                                                            )
+                                                            dragStart = cellOrigin + offset
                                                             dragPos = dragStart
                                                         },
                                                         onDrag = { change, amount ->
@@ -1447,6 +1453,13 @@ fun WorkspacePage(
                                                 }
                                             )
                                         }
+                                        DropdownMenuItem(
+                                            text = { Text("フォルダを作る") },
+                                            onClick = {
+                                                menuFor = null
+                                                onMakeFolder(item)
+                                            }
+                                        )
                                         DropdownMenuItem(
                                             text = { Text("名前を変更") },
                                             onClick = {
