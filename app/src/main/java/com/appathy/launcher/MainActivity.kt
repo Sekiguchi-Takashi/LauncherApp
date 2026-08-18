@@ -490,13 +490,14 @@ fun LauncherRoot(
                     SettingsTile.setHidden(context, true)
                 }
             },
-            onMoveItem = { item, r, c ->
-                if (!cellCoveredByWidget(widgets, item.page, r, c)) {
-                    applyDrop(dropOnto(homeItems, folders, item, r, c))
-                }
-            },
             folders = folders,
             onOpenFolder = { openFolderId = it },
+            onMoveToCell = { item, page, r, c ->
+                val occupied = homeItems.any {
+                    it.page == page && it.row == r && it.col == c
+                }
+                if (!occupied) saveHome(placeItem(homeItems, item, page, r, c))
+            },
             onMoveToPage = { item, delta ->
                 val target = item.page + delta
                 if (target in 0 until contentPages) {
@@ -956,8 +957,8 @@ fun HomeScreen(
     onOpenQuickPanel: () -> Unit,
     onLaunch: (AppEntry) -> Unit,
     onRemoveItem: (HomeItem) -> Unit,
-    onMoveItem: (HomeItem, Int, Int) -> Unit,
     onMoveToPage: (HomeItem, Int) -> Unit,
+    onMoveToCell: (HomeItem, Int, Int, Int) -> Unit,
     onAppInfo: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onOpenSettings: () -> Unit,
@@ -976,6 +977,9 @@ fun HomeScreen(
     val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { totalPages })
     val pagerScope = rememberCoroutineScope()
+    var selected by remember { mutableStateOf<HomeItem?>(null) }
+    LaunchedEffect(editMode) { if (!editMode) selected = null }
+    val onSelect: (HomeItem?) -> Unit = { selected = it }
 
     Column(
         modifier = Modifier
@@ -1020,7 +1024,6 @@ fun HomeScreen(
                     },
                     onLaunch = onLaunch,
                     onRemoveItem = onRemoveItem,
-                    onMoveItem = onMoveItem,
                     onMoveToPage = onMoveToPage,
                     onAppInfo = onAppInfo,
                     onEditWidget = onEditWidget,
@@ -1037,8 +1040,18 @@ fun HomeScreen(
                     onRenameApp = onRenameApp,
                     onChangeIcon = onChangeIcon,
                     onMakeFolder = onMakeFolder,
-                    onScrollToPage = { target ->
-                        pagerScope.launch { pagerState.animateScrollToPage(target) }
+                    selected = selected,
+                    onTapCell = { item ->
+                        if (selected == null) onSelect(item) else onSelect(null)
+                    },
+                    onTapEmpty = { r, c ->
+                        val picked = selected
+                        if (picked == null) {
+                            onExitEdit()
+                        } else {
+                            onMoveToCell(picked, page, r, c)
+                            onSelect(null)
+                        }
                     },
                     resolveKey = { key ->
                         val i = key.lastIndexOf('/')
@@ -1171,7 +1184,6 @@ fun WorkspacePage(
     resolve: (HomeItem) -> AppEntry?,
     onLaunch: (AppEntry) -> Unit,
     onRemoveItem: (HomeItem) -> Unit,
-    onMoveItem: (HomeItem, Int, Int) -> Unit,
     onMoveToPage: (HomeItem, Int) -> Unit,
     onAppInfo: (String) -> Unit,
     onEditWidget: (WidgetItem) -> Unit,
@@ -1188,7 +1200,9 @@ fun WorkspacePage(
     onRenameApp: (AppEntry) -> Unit,
     onChangeIcon: (AppEntry) -> Unit,
     onMakeFolder: (HomeItem) -> Unit,
-    onScrollToPage: (Int) -> Unit,
+    selected: HomeItem?,
+    onTapCell: (HomeItem) -> Unit,
+    onTapEmpty: (Int, Int) -> Unit,
     resolveKey: (String) -> AppEntry?
 ) {
     var gridOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -1202,12 +1216,6 @@ fun WorkspacePage(
         val contextForMenu = LocalContext.current
         val cellW = constraints.maxWidth.toFloat() / cols
         val cellH = constraints.maxHeight.toFloat() / rows
-        var dragItem by remember { mutableStateOf<HomeItem?>(null) }
-        var dragPos by remember { mutableStateOf(Offset.Zero) }
-        var dragStart by remember { mutableStateOf(Offset.Zero) }
-        LaunchedEffect(editMode) {
-            if (!editMode) dragItem = null
-        }
         var menuFor by remember { mutableStateOf<HomeItem?>(null) }
         val wiggle = rememberInfiniteTransition(label = "wiggle")
         val wiggleAngle by wiggle.animateFloat(
@@ -1241,9 +1249,17 @@ fun WorkspacePage(
                                 folders.find { it.id == item!!.activityName }
                             } else null
                             val app = if (isFolder || isSettings) null else item?.let { resolve(it) }
-                            val visible = item != null && item != dragItem &&
+                            val visible = item != null &&
                                 (app != null || folder != null || isSettings)
+                            if (item == null && editMode) {
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .clickable { onTapEmpty(r, c) }
+                                )
+                            }
                             if (item != null && visible) {
+                                val isPicked = item == selected
                                 val phase = if ((r + c) % 2 == 0) 1f else -1f
                                 var iconBounds by remember(item) {
                                     mutableStateOf<android.graphics.Rect?>(null)
@@ -1262,63 +1278,18 @@ fun WorkspacePage(
                                             cellOrigin = coords.positionInWindow() - gridOrigin
                                         }
                                         .graphicsLayer {
-                                            rotationZ =
-                                                if (editMode || dragItem != null) {
-                                                    wiggleAngle * phase
-                                                } else 0f
+                                            rotationZ = if (editMode) wiggleAngle * phase else 0f
+                                            val s = if (isPicked) 1.18f else 1f
+                                            scaleX = s
+                                            scaleY = s
+                                            alpha = if (isPicked) 0.85f else 1f
                                         }
                                         .then(
                                             if (editMode) {
-                                                Modifier
-                                                    .clickable { menuFor = item }
-                                                    .pointerInput(item) {
-                                                    detectDragGestures(
-                                                        onDragStart = { offset ->
-                                                            dragItem = item
-                                                            dragStart = cellOrigin + offset
-                                                            dragPos = dragStart
-                                                        },
-                                                        onDrag = { change, _ ->
-                                                            change.consume()
-                                                            dragPos =
-                                                                cellOrigin + change.position
-                                                        },
-                                                        onDragEnd = {
-                                                            val moving = dragItem
-                                                            if (moving != null) {
-                                                                val dist = (dragPos - dragStart)
-                                                                    .getDistance()
-                                                                val w = cellW * cols
-                                                                val edge = w * 0.08f
-                                                                if (dist < cellW * 0.15f) {
-                                                                    menuFor = moving
-                                                                } else if (
-                                                                    dragPos.x < edge &&
-                                                                    pageIndex > 0
-                                                                ) {
-                                                                    onMoveToPage(moving, -1)
-                                                                    onScrollToPage(pageIndex - 1)
-                                                                } else if (
-                                                                    dragPos.x > w - edge &&
-                                                                    pageIndex < pages - 1
-                                                                ) {
-                                                                    onMoveToPage(moving, 1)
-                                                                    onScrollToPage(pageIndex + 1)
-                                                                } else {
-                                                                    val tc = (dragPos.x / cellW)
-                                                                        .toInt()
-                                                                        .coerceIn(0, cols - 1)
-                                                                    val tr = (dragPos.y / cellH)
-                                                                        .toInt()
-                                                                        .coerceIn(0, rows - 1)
-                                                                    onMoveItem(moving, tr, tc)
-                                                                }
-                                                            }
-                                                            dragItem = null
-                                                        },
-                                                        onDragCancel = { dragItem = null }
-                                                    )
-                                                }
+                                                Modifier.combinedClickable(
+                                                    onClick = { onTapCell(item) },
+                                                    onLongClick = { menuFor = item }
+                                                )
                                             } else {
                                                 Modifier.combinedClickable(
                                                     onClick = {
@@ -1635,37 +1606,6 @@ fun WorkspacePage(
             }
         }
 
-        val dragging = dragItem
-        if (dragging != null) {
-            val dragApp = resolve(dragging)
-            val dragFolder = if (dragging.packageName == FOLDER_PKG) {
-                folders.find { it.id == dragging.activityName }
-            } else null
-            Box(
-                Modifier
-                    .offset {
-                        IntOffset(
-                            (dragPos.x - 28.dp.toPx()).roundToInt(),
-                            (dragPos.y - 28.dp.toPx()).roundToInt()
-                        )
-                    }
-                    .size(56.dp)
-            ) {
-                if (dragFolder != null) {
-                    FolderIcon(folder = dragFolder, resolve = resolveKey)
-                } else if (dragApp != null) {
-                    AppIcon(
-                        app = dragApp,
-                        size = 68.dp,
-                        modifier = Modifier.shadow(
-                            elevation = 14.dp,
-                            shape = RoundedCornerShape(68.dp * IconCorner),
-                            clip = false
-                        )
-                    )
-                }
-            }
-        }
     }
 }
 
