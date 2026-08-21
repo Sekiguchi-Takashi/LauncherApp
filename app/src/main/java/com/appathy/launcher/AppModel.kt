@@ -148,7 +148,8 @@ object BackupData {
     )
     private val intKeys = listOf("pages", "rows", "cols")
     private val boolKeys = listOf(
-        "settings_tile_hidden", "switch_icon", "home_prompt", "notif_badge"
+        "settings_tile_hidden", "switch_icon", "home_prompt", "notif_badge",
+        "show_library_page", "show_device_page"
     )
 
     fun serialize(context: Context): String {
@@ -308,6 +309,14 @@ object LauncherSettings {
     fun switchIcon(context: Context): Boolean = prefs(context).getBoolean("switch_icon", true)
     fun homePrompt(context: Context): Boolean = prefs(context).getBoolean("home_prompt", true)
     fun notifBadge(context: Context): Boolean = prefs(context).getBoolean("notif_badge", true)
+    fun showLibraryPage(context: Context): Boolean =
+        prefs(context).getBoolean("show_library_page", true)
+    fun setShowLibraryPage(context: Context, v: Boolean) =
+        prefs(context).edit().putBoolean("show_library_page", v).apply()
+    fun showDevicePage(context: Context): Boolean =
+        prefs(context).getBoolean("show_device_page", true)
+    fun setShowDevicePage(context: Context, v: Boolean) =
+        prefs(context).edit().putBoolean("show_device_page", v).apply()
     fun setNotifBadge(context: Context, v: Boolean) =
         prefs(context).edit().putBoolean("notif_badge", v).apply()
     fun setHomePrompt(context: Context, v: Boolean) =

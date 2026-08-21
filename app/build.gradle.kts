@@ -12,8 +12,8 @@ android {
         applicationId = "com.appathy.launcher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 42
-        versionName = "3.5"
+        versionCode = 43
+        versionName = "3.5.1"
     }
 
     signingConfigs {

@@ -412,3 +412,11 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
   - 3秒ごとに Wi-Fi / Bluetooth / 周辺機器を再取得。端末探索は画面を離れると stop() する
 - AndroidManifest に INTERNET / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE / BLUETOOTH_CONNECT を追加
 - 制約: Android 10 以降、アプリから Wi-Fi と Bluetooth を直接オンオフできない（setWifiEnabled は無効、BluetoothAdapter.enable は API 33 で削除）。タイルは状態表示と設定パネルへの導線に留めている
+
+## v3.5.1 実装済み（デバイスページを全画面化・ページの表示切替）
+- DevicePage を画面いっぱいに変更し、背景を不透明の黒に（`fillMaxSize().background(Color.Black)`）。壁紙が透けないので白文字が常に読める。上部に「デバイス」見出しを追加し、縦スクロール対応のまま
+- App Library ページとデバイスページを個別に表示/非表示できるようにした
+  - LauncherSettings に showLibraryPage("show_library_page") / showDevicePage("show_device_page") を追加（既定はどちらも true）。バックアップ対象にも追加
+  - 設定アプリ > ホーム画面 に「App Library ページ」「デバイス ページ」を追加。タップで表示⇄非表示が切り替わる
+  - ページ数は `contentPages + (Libraryなら1) + (Deviceなら1)`。振り分けは libraryIndex = pages、deviceIndex = pages + (Libraryが有効なら1)。どちらも -1 のときは通常のワークスペースだけになる
+  - ページドットの数も totalPages 由来なので自動で追従する

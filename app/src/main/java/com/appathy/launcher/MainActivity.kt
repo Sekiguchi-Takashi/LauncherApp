@@ -253,6 +253,8 @@ fun LauncherRoot(
     var quickPanelOpen by remember { mutableStateOf(false) }
     var homePrompt by remember { mutableStateOf(LauncherSettings.homePrompt(context)) }
     var notifBadge by remember { mutableStateOf(LauncherSettings.notifBadge(context)) }
+    var showLibraryPage by remember { mutableStateOf(LauncherSettings.showLibraryPage(context)) }
+    var showDevicePage by remember { mutableStateOf(LauncherSettings.showDevicePage(context)) }
     var labelOverrides by remember { mutableStateOf(AppOverrides.labels(context)) }
     var iconOverrides by remember { mutableStateOf(AppOverrides.icons(context)) }
     var renameTarget by remember { mutableStateOf<AppEntry?>(null) }
@@ -448,7 +450,8 @@ fun LauncherRoot(
     }
 
     val contentPages = pagesNeeded(homeItems, pages)
-    val totalPages = contentPages + 2
+    val extraPages = (if (showLibraryPage) 1 else 0) + (if (showDevicePage) 1 else 0)
+    val totalPages = contentPages + extraPages
 
     val folderOpen = openFolderId != null
 
@@ -471,6 +474,8 @@ fun LauncherRoot(
             favApps = favApps,
             pages = contentPages,
             totalPages = totalPages,
+            showLibraryPage = showLibraryPage,
+            showDevicePage = showDevicePage,
             rows = rows,
             cols = cols,
             libraryOnly = libraryOnly,
@@ -622,6 +627,16 @@ fun LauncherRoot(
             onOpenAppList = {
                 settingsAppOpen = false
                 appListOpen = true
+            },
+            libraryPageOn = showLibraryPage,
+            onToggleLibraryPage = {
+                showLibraryPage = !showLibraryPage
+                LauncherSettings.setShowLibraryPage(context, showLibraryPage)
+            },
+            devicePageOn = showDevicePage,
+            onToggleDevicePage = {
+                showDevicePage = !showDevicePage
+                LauncherSettings.setShowDevicePage(context, showDevicePage)
             },
             apps = apps,
             isDefaultHomeNow = isDefaultHome(context),
@@ -947,6 +962,8 @@ fun HomeScreen(
     favApps: List<AppEntry>,
     pages: Int,
     totalPages: Int,
+    showLibraryPage: Boolean,
+    showDevicePage: Boolean,
     rows: Int,
     cols: Int,
     libraryOnly: Set<String>,
@@ -1001,9 +1018,15 @@ fun HomeScreen(
                 userScrollEnabled = !editMode,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                if (page == pages + 1) {
+                val libraryIndex = if (showLibraryPage) pages else -1
+                val deviceIndex = if (showDevicePage) {
+                    pages + (if (showLibraryPage) 1 else 0)
+                } else -1
+                if (page == deviceIndex) {
                     DevicePage()
-                } else if (page >= pages) {
+                    return@HorizontalPager
+                }
+                if (page == libraryIndex) {
                     AppLibraryPage(
                         apps = apps,
                         onLaunch = onLaunch,
@@ -2240,6 +2263,10 @@ fun SettingsApp(
     settingsTileHidden: Boolean,
     hiddenCount: Int,
     onOpenAppList: () -> Unit,
+    libraryPageOn: Boolean,
+    onToggleLibraryPage: () -> Unit,
+    devicePageOn: Boolean,
+    onToggleDevicePage: () -> Unit,
     apps: List<AppEntry>,
     isDefaultHomeNow: Boolean,
     onPages: (Int) -> Unit,
@@ -2332,6 +2359,16 @@ fun SettingsApp(
                         onDismiss()
                         onAddWidget()
                     })
+                    SettingsRow(
+                        label = "App Library ページ",
+                        value = if (libraryPageOn) "表示" else "非表示",
+                        onClick = onToggleLibraryPage
+                    )
+                    SettingsRow(
+                        label = "デバイス ページ",
+                        value = if (devicePageOn) "表示" else "非表示",
+                        onClick = onToggleDevicePage
+                    )
                     SettingsRow(
                         label = "アプリ一覧",
                         value = hiddenCount.toString() + " 件を非表示",
@@ -3192,11 +3229,18 @@ fun DevicePage() {
 
     Column(
         Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.5f)
+            .fillMaxSize()
+            .background(Color.Black)
             .padding(horizontal = 14.dp)
             .verticalScroll(rememberScrollState())
     ) {
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "デバイス",
+            fontSize = LauncherType.screenTitle,
+            color = LauncherColors.text
+        )
+        Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             RadioTile(
                 label = "Wi-Fi",
@@ -3272,5 +3316,6 @@ fun DevicePage() {
             DeviceStatusRow("スピーカー", peripherals.speaker)
             DeviceStatusRow("マイク", peripherals.microphone)
         }
+        Spacer(Modifier.height(24.dp))
     }
 }
