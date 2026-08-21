@@ -63,6 +63,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -75,6 +77,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -445,7 +448,7 @@ fun LauncherRoot(
     }
 
     val contentPages = pagesNeeded(homeItems, pages)
-    val totalPages = contentPages + 1
+    val totalPages = contentPages + 2
 
     val folderOpen = openFolderId != null
 
@@ -998,7 +1001,9 @@ fun HomeScreen(
                 userScrollEnabled = !editMode,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                if (page >= pages) {
+                if (page == pages + 1) {
+                    DevicePage()
+                } else if (page >= pages) {
                     AppLibraryPage(
                         apps = apps,
                         onLaunch = onLaunch,
@@ -3093,5 +3098,179 @@ fun QuickAction(title: String, sub: String, onClick: () -> Unit) {
             Text(sub, fontSize = LauncherType.iconLabel, color = LauncherColors.textMuted)
         }
         Text("›", fontSize = 18.sp, color = LauncherColors.textDim)
+    }
+}
+
+@Composable
+fun DeviceStatusRow(label: String, connected: Boolean) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(
+                    if (connected) LauncherColors.positive else Color.White.copy(alpha = 0.25f)
+                )
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            label,
+            fontSize = LauncherType.bodySmall,
+            color = if (connected) LauncherColors.text else LauncherColors.textDim,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            if (connected) "接続中" else "未接続",
+            fontSize = LauncherType.iconLabel,
+            color = if (connected) LauncherColors.positive else LauncherColors.textDim
+        )
+    }
+}
+
+@Composable
+fun RadioTile(
+    label: String,
+    state: Boolean?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val on = state == true
+    Column(
+        modifier
+            .clip(LauncherShape.sheet)
+            .background(if (on) LauncherColors.action else LauncherColors.glass)
+            .border(1.dp, LauncherColors.edge, LauncherShape.sheet)
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 14.dp)
+    ) {
+        Text(label, fontSize = LauncherType.bodySmall, color = LauncherColors.text)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            when (state) {
+                true -> "オン"
+                false -> "オフ"
+                else -> "不明"
+            },
+            fontSize = LauncherType.caption,
+            color = if (on) LauncherColors.text else LauncherColors.textMuted
+        )
+        Text(
+            "タップで設定へ",
+            fontSize = LauncherType.micro,
+            color = LauncherColors.textDim
+        )
+    }
+}
+
+@Composable
+fun DevicePage() {
+    val context = LocalContext.current
+    var wifi by remember { mutableStateOf(DeviceInfo.wifiEnabled(context)) }
+    var bluetooth by remember { mutableStateOf(DeviceInfo.bluetoothEnabled(context)) }
+    var peripherals by remember { mutableStateOf(DeviceInfo.peripherals(context)) }
+    var peers by remember { mutableStateOf(listOf<String>()) }
+    val finder = remember { PeerFinder(context) }
+
+    DisposableEffect(Unit) {
+        finder.start { list -> peers = list }
+        onDispose { finder.stop() }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            wifi = DeviceInfo.wifiEnabled(context)
+            bluetooth = DeviceInfo.bluetoothEnabled(context)
+            peripherals = DeviceInfo.peripherals(context)
+            kotlinx.coroutines.delay(3000)
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.5f)
+            .padding(horizontal = 14.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            RadioTile(
+                label = "Wi-Fi",
+                state = wifi,
+                onClick = { SystemControl.openWifi(context) },
+                modifier = Modifier.weight(1f)
+            )
+            RadioTile(
+                label = "Bluetooth",
+                state = bluetooth,
+                onClick = { SystemControl.openBluetooth(context) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(LauncherShape.panel)
+                .background(LauncherColors.glass)
+                .border(1.dp, LauncherColors.edge, LauncherShape.panel)
+                .padding(12.dp)
+        ) {
+            Text(
+                "同じネットワークの端末",
+                fontSize = LauncherType.caption,
+                color = LauncherColors.textMuted
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                DeviceInfo.deviceName(context) + "（この端末）",
+                fontSize = LauncherType.bodySmall,
+                color = LauncherColors.text
+            )
+            if (peers.isEmpty()) {
+                Text(
+                    "ほかの端末は見つかっていません",
+                    fontSize = LauncherType.iconLabel,
+                    color = LauncherColors.textDim
+                )
+            } else {
+                peers.forEach { name ->
+                    Text(
+                        name,
+                        fontSize = LauncherType.bodySmall,
+                        color = LauncherColors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(LauncherShape.panel)
+                .background(LauncherColors.glass)
+                .border(1.dp, LauncherColors.edge, LauncherShape.panel)
+                .padding(12.dp)
+        ) {
+            Text(
+                "周辺機器",
+                fontSize = LauncherType.caption,
+                color = LauncherColors.textMuted
+            )
+            Spacer(Modifier.height(4.dp))
+            DeviceStatusRow("キーボード", peripherals.keyboard)
+            DeviceStatusRow("マウス", peripherals.mouse)
+            DeviceStatusRow("モニタ", peripherals.monitor)
+            DeviceStatusRow("スピーカー", peripherals.speaker)
+            DeviceStatusRow("マイク", peripherals.microphone)
+        }
     }
 }

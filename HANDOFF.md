@@ -401,3 +401,14 @@ Androidホームアプリ（ランチャー）。Nova風機能をComposeでゼ�
 - 選択状態は HomeScreen が持つのでページをまたいでも保持される。ページドットをタップして別ページへ移り、そこの空きマスをタップすれば別ページへ移動できる
 - 移動は onMoveToCell(item, page, row, col) → 空きセルのときだけ placeItem() で確定
 - アニメーションは入れていない（要望どおり）
+
+## v3.5 実装済み（デバイスページ）
+- ページ構成を contentPages + 2 に変更。右端が App Library、その右に DevicePage を追加（画面の上半分を使う）
+- DeviceInfo.kt を新設
+  - wifiEnabled / bluetoothEnabled: WifiManager.isWifiEnabled と BluetoothManager.adapter.isEnabled。権限拒否や機種差は runCatching で null（表示は「不明」）
+  - peripherals(): キーボードとマウスは InputDevice を走査（isVirtual を除外、KEYBOARD_TYPE_ALPHABETIC と SOURCE_MOUSE/SOURCE_TOUCHPAD で判定）、モニタは DisplayManager に DEFAULT_DISPLAY 以外があるか、スピーカーとマイクは AudioManager.getDevices の type を見る（A2DP / 有線 / USB / HDMI）
+  - PeerFinder: NsdManager で `_appathylnch._tcp.` を登録しつつ探索する。自分の登録名は除外。ServerSocket(0) で空きポートを取得して登録に使う
+- DevicePage: Wi-Fi / Bluetooth のタイル2枚（状態表示＋タップで設定パネル）、同じネットワークの端末一覧（自端末＋発見した端末）、周辺機器5種の接続表示（緑の点＋「接続中」）
+  - 3秒ごとに Wi-Fi / Bluetooth / 周辺機器を再取得。端末探索は画面を離れると stop() する
+- AndroidManifest に INTERNET / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE / BLUETOOTH_CONNECT を追加
+- 制約: Android 10 以降、アプリから Wi-Fi と Bluetooth を直接オンオフできない（setWifiEnabled は無効、BluetoothAdapter.enable は API 33 で削除）。タイルは状態表示と設定パネルへの導線に留めている
